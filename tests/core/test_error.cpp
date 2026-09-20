@@ -56,17 +56,24 @@ namespace {
 
 #if META_AUTH_HAS_REFLECTION
 
+inline constexpr auto error_count = std::meta::enumerators_of(^^meta_auth::auth_error).size();
+
 /// Every enumerator of `auth_error`, in declaration order.
-consteval auto all_errors() -> std::array<meta_auth::auth_error, 28> {
+///
+/// The count comes from reflection rather than from a literal. It used to be a
+/// literal -- `std::array<auth_error, 28>` -- and adding an enumerator to the
+/// library then made this function index past the end of the array: the
+/// reflective walk was bounded by a number that no longer described the
+/// enumeration, so the test that exists to catch an unhandled enumerator
+/// failed for a different reason and said nothing about the actual defect.
+consteval auto all_errors() -> std::array<meta_auth::auth_error, error_count> {
     auto enumerators = std::meta::enumerators_of(^^meta_auth::auth_error);
-    std::array<meta_auth::auth_error, 28> errors{};
+    std::array<meta_auth::auth_error, error_count> errors{};
     for (std::size_t index = 0; index < enumerators.size(); ++index) {
         errors[index] = std::meta::extract<meta_auth::auth_error>(enumerators[index]);
     }
     return errors;
 }
-
-inline constexpr auto error_count = std::meta::enumerators_of(^^meta_auth::auth_error).size();
 
 #endif // META_AUTH_HAS_REFLECTION
 

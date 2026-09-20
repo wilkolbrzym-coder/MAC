@@ -208,7 +208,13 @@ inline constexpr std::size_t violation_report_capacity = 1024;
 
     std::size_t written = static_cast<std::size_t>(result.out - buffer.data());
     // result.size is the number of characters the report *would* have used.
-    const bool truncated = static_cast<std::size_t>(result.size) > buffer.size();
+    //
+    // `>=` rather than `>`: a report that exactly fills the buffer is not
+    // truncated, but it also has no room for a terminator, so the branch that
+    // appends one must not run. Writing `buffer[buffer.size()]` is one byte
+    // past the end of a stack array on the fail-stop path -- the one path in
+    // this library that has to be reliable.
+    const bool truncated = static_cast<std::size_t>(result.size) >= buffer.size();
 
     if (truncated) {
         // Replace the tail with a marker rather than leaving a half-written
@@ -219,7 +225,10 @@ inline constexpr std::size_t violation_report_capacity = 1024;
             buffer[keep + index] = marker[index];
         }
         written = keep + marker.size() < buffer.size() ? keep + marker.size() : buffer.size();
-    } else {
+    } else if (written < buffer.size()) {
+        // The terminator is not part of the returned view: the caller gets the
+        // report's length, and a C API that needs a terminator must be given a
+        // buffer with room for one.
         buffer[written] = '\0';
     }
 
@@ -405,14 +414,19 @@ inline void set_violation_stream(std::FILE* stream) noexcept {
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
-#define META_AUTH_WEAK_SYMBOL __attribute__((weak))
+#define META_AUTH_WEAK_SYMBOL_INTERNAL __attribute__((weak))
 #else
 /// The handler is installed with a non-weak definition on toolchains without a
 /// weak-symbol attribute. That is correct for a single translation unit and a
 /// duplicate-definition error for several, which is why the header states the
 /// constraint rather than discovering it at link time.
-#define META_AUTH_WEAK_SYMBOL
+#define META_AUTH_WEAK_SYMBOL_INTERNAL
 #endif
+
+// The name is internal and `#undef`ed at the end of this header: it exists for
+// exactly one declaration, and a macro that leaks into every translation unit
+// which includes the library is a collision waiting for a consumer who has a
+// plausible use for the same name.
 
 #if META_AUTH_HAS_CONTRACTS && META_AUTH_CONFIG_INSTALL_VIOLATION_HANDLER
 
@@ -474,7 +488,7 @@ namespace meta_auth::diag::detail {
 /// declaration also documents the exact signature P2900 requires.
 void handle_contract_violation(const std::contracts::contract_violation& violation);
 
-META_AUTH_WEAK_SYMBOL void handle_contract_violation(
+META_AUTH_WEAK_SYMBOL_INTERNAL void handle_contract_violation(
     const std::contracts::contract_violation& violation) {
     const std::source_location location = violation.location();
 
@@ -573,3 +587,7 @@ META_AUTH_WEAK_SYMBOL void handle_contract_violation(
     })
 
 #endif // META_AUTH_CORE_CONTRACT_HPP
+
+// The internal spelling of the weak-symbol attribute is not part of the public
+// vocabulary.
+#undef META_AUTH_WEAK_SYMBOL_INTERNAL

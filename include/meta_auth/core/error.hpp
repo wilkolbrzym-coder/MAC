@@ -73,6 +73,7 @@ enum class auth_error : std::uint16_t {
     capability_revoked = 302,   ///< the capability's epoch is stale
     capability_forged = 303,    ///< the capability did not originate from an authority
     resource_unavailable = 304, ///< the mediated resource is not currently present
+    capability_neutralised = 305,///< the capability was consumed and holds nothing
 
     // -- identity ---------------------------------------------------------
     unauthenticated = 400,       ///< no authenticated session
@@ -133,6 +134,8 @@ enum class auth_error : std::uint16_t {
         return "capability_forged";
     case auth_error::resource_unavailable:
         return "resource_unavailable";
+    case auth_error::capability_neutralised:
+        return "capability_neutralised";
 
     case auth_error::unauthenticated:
         return "unauthenticated";
@@ -210,6 +213,7 @@ enum class auth_error : std::uint16_t {
     case auth_error::capability_revoked:
     case auth_error::capability_forged:
     case auth_error::resource_unavailable:
+    case auth_error::capability_neutralised:
     case auth_error::unauthenticated:
     case auth_error::credential_rejected:
     case auth_error::attestation_failed:
@@ -257,6 +261,7 @@ enum class auth_error : std::uint16_t {
     case auth_error::delegation_denied:
     case auth_error::capability_revoked:
     case auth_error::capability_forged:
+    case auth_error::capability_neutralised:
     case auth_error::attestation_failed:
     case auth_error::trust_anchor_unknown:
     case auth_error::identity_revoked:

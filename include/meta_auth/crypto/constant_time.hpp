@@ -29,6 +29,7 @@
 
 #include "meta_auth/config.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -52,8 +53,16 @@ inline void optimization_barrier(std::uint8_t& value) noexcept {
     // still computes the right answer; the timing property is then only as
     // good as the compiler's restraint, which is why the fallback is stated
     // rather than silently assumed.
-    static volatile std::uint8_t sink = 0;
-    sink = static_cast<std::uint8_t>(sink ^ value);
+    //
+    // The sink is atomic and not merely volatile. Comparing a MAC is an
+    // ordinary operation on ordinary objects, so two threads verifying
+    // credentials at the same time reach this function concurrently; a plain
+    // `volatile` counter written from both is a data race, which is undefined
+    // behaviour in the one place in this library where a defect is invisible.
+    // A relaxed RMW to an atomic has no ordering obligation and compiles to
+    // the same instruction, so the barrier costs the same as it did.
+    static std::atomic<std::uint8_t> sink{0};
+    sink.fetch_xor(value, std::memory_order_relaxed);
 #endif
 }
 
@@ -126,7 +135,7 @@ inline void optimization_barrier(std::uint8_t& value) noexcept {
 /// so a secret-dependent `if` leaks the secret even when the comparison itself
 /// is constant time.
 template <typename T>
-    requires std::is_integral_v<T>
+    requires std::is_integral_v<T> && (!std::is_same_v<T, bool>)
 [[nodiscard]] constexpr auto constant_time_select(bool condition, T if_set, T otherwise) noexcept
     -> T {
     using unsigned_type = std::make_unsigned_t<T>;
@@ -142,8 +151,13 @@ template <typename T>
     return static_cast<T>(left | right);
 }
 
-/// Zero or one, as a value: the mask form used by the primitives above.
-[[nodiscard]] constexpr auto constant_time_mask(bool value) noexcept -> std::uint8_t {
+/// Zero or one, as a value.
+///
+/// Named for what it returns rather than for what it is often used to build: a
+/// caller that wants a full-width 0x00/0xFF mask wants
+/// `constant_time_select`, and a function called `mask` that returns one bit
+/// is a name that invites the wrong assumption.
+[[nodiscard]] constexpr auto constant_time_bit(bool value) noexcept -> std::uint8_t {
     return value ? std::uint8_t{1} : std::uint8_t{0};
 }
 

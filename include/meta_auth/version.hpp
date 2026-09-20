@@ -25,9 +25,16 @@ inline constexpr std::string_view META_AUTH_VERSION_STRING = "0.1.0";
 namespace meta_auth {
 
 /// Numeric version, packed as 0xMMmmpp for cheap comparisons.
+///
+/// The fields are masked, so a component above 255 shifts into the byte it
+/// belongs to rather than carrying into its neighbour -- an unmasked minor of
+/// 0x100 would silently set the major to the next value, and a comparison
+/// against a packed constant would then be wrong in the direction that claims
+/// a newer version. The masks cost nothing and the failure they prevent is one
+/// nobody would think to look for.
 [[nodiscard]] constexpr auto version_packed() noexcept -> std::uint32_t {
-    return (META_AUTH_VERSION_MAJOR << 16U) | (META_AUTH_VERSION_MINOR << 8U)
-           | META_AUTH_VERSION_PATCH;
+    return ((META_AUTH_VERSION_MAJOR & 0xFFU) << 16U)
+           | ((META_AUTH_VERSION_MINOR & 0xFFU) << 8U) | (META_AUTH_VERSION_PATCH & 0xFFU);
 }
 
 /// Project name as it appears in packages and diagnostics.

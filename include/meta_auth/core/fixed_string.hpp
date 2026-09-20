@@ -34,6 +34,10 @@ namespace meta_auth {
 /// length without it.
 template <std::size_t N>
 struct fixed_string {
+    static_assert(N >= 1,
+                  "fixed_string<N> stores N characters including the terminator, so N must be at "
+                  "least 1. A zero-length array is not standard C++ and size() would underflow.");
+
     /// Storage, including the terminator. Public because a structural type has
     /// no private members, which is a language requirement rather than a
     /// design choice.
@@ -43,7 +47,13 @@ struct fixed_string {
 
     /// Construct from a string literal. The literal's own size fixes N, so a
     /// name that is too long for a consumer fails at the consumer's boundary.
-    constexpr fixed_string(const char (&text)[N]) noexcept {
+    ///
+    /// The precondition is what makes `c_str()` honest. The constructor
+    /// accepts any `char[N]`, including one that is not NUL-terminated, and
+    /// the type promises in its own documentation that `data` holds a
+    /// terminator -- so the promise is checked rather than assumed.
+    constexpr fixed_string(const char (&text)[N]) noexcept META_AUTH_PRE(text[N - 1] == '\0') {
+        META_AUTH_PRE_FALLBACK(text[N - 1] == '\0');
         std::copy_n(text, N, data);
     }
 
@@ -79,17 +89,64 @@ struct fixed_string {
         return lhs.view() == rhs.view();
     }
 
+    // -----------------------------------------------------------------------
+    // Searching
+    //
+    // The three predicates below are written as explicit loops rather than
+    // delegated to `std::string_view::find` and `substr`. `find` is not a
+    // constant expression in every standard library this library supports --
+    // libstdc++ 15 and the libc++ shipped with recent Apple toolchains both
+    // reject it during constant evaluation -- and these predicates are used in
+    // `static_assert`s, where "works at run time on one implementation" is not
+    // good enough. A loop over at most a few dozen characters is also what the
+    // optimiser produces anyway.
+    // -----------------------------------------------------------------------
+
     [[nodiscard]] constexpr auto starts_with(std::string_view prefix) const noexcept -> bool {
-        return view().substr(0, prefix.size()) == prefix;
+        if (prefix.size() > size()) {
+            return false;
+        }
+        for (std::size_t index = 0; index < prefix.size(); ++index) {
+            if (data[index] != prefix[index]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     [[nodiscard]] constexpr auto ends_with(std::string_view suffix) const noexcept -> bool {
-        return view().size() >= suffix.size()
-               && view().substr(view().size() - suffix.size()) == suffix;
+        if (suffix.size() > size()) {
+            return false;
+        }
+        const std::size_t offset = size() - suffix.size();
+        for (std::size_t index = 0; index < suffix.size(); ++index) {
+            if (data[offset + index] != suffix[index]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     [[nodiscard]] constexpr auto contains(std::string_view needle) const noexcept -> bool {
-        return view().find(needle) != std::string_view::npos;
+        if (needle.empty()) {
+            return true;
+        }
+        if (needle.size() > size()) {
+            return false;
+        }
+        for (std::size_t start = 0; start + needle.size() <= size(); ++start) {
+            bool matched = true;
+            for (std::size_t index = 0; index < needle.size(); ++index) {
+                if (data[start + index] != needle[index]) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) {
+                return true;
+            }
+        }
+        return false;
     }
 };
 

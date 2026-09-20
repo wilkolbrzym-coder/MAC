@@ -395,9 +395,9 @@ META_AUTH_TEST("constant_time", "less_than_matches_the_operator") {
     }
 }
 
-META_AUTH_TEST("constant_time", "mask_is_zero_or_one") {
-    META_AUTH_CHECK_EQ(meta_auth::crypto::constant_time_mask(true), std::uint8_t{1});
-    META_AUTH_CHECK_EQ(meta_auth::crypto::constant_time_mask(false), std::uint8_t{0});
+META_AUTH_TEST("constant_time", "bit_is_zero_or_one") {
+    META_AUTH_CHECK_EQ(meta_auth::crypto::constant_time_bit(true), std::uint8_t{1});
+    META_AUTH_CHECK_EQ(meta_auth::crypto::constant_time_bit(false), std::uint8_t{0});
 }
 
 // ---------------------------------------------------------------------------
@@ -447,8 +447,23 @@ META_AUTH_TEST("secret_buffer", "assign_and_read_back") {
     META_AUTH_CHECK(meta_auth::crypto::constant_time_equal(buffer.bytes(), key));
 
     std::array<std::byte, 5> copy{};
-    buffer.copy_to(copy);
+    META_AUTH_CHECK(buffer.copy_to(copy));
     META_AUTH_CHECK(meta_auth::crypto::constant_time_equal(copy, key));
+}
+
+META_AUTH_TEST("secret_buffer", "copy_to_refuses_a_destination_that_is_too_small") {
+    // The mirror image of `assign`: a destination that cannot hold the whole
+    // secret gets nothing, rather than the first half of a key. A truncated
+    // key is a different key, and handing one back as if it were complete is
+    // how a check becomes a formality.
+    meta_auth::crypto::secret_buffer<32> buffer;
+    const std::array<std::byte, 5> key{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4},
+                                       std::byte{5}};
+    META_AUTH_REQUIRE(buffer.assign(key));
+
+    std::array<std::byte, 4> too_small{};
+    META_AUTH_CHECK(!buffer.copy_to(too_small));
+    META_AUTH_CHECK(meta_auth::crypto::constant_time_is_zero(too_small));
 }
 
 META_AUTH_TEST("secret_buffer", "a_key_that_does_not_fit_is_refused") {
@@ -468,6 +483,31 @@ META_AUTH_TEST("secret_buffer", "wipe_clears_the_contents_and_the_length") {
     buffer.wipe();
     META_AUTH_CHECK(buffer.is_empty());
     META_AUTH_CHECK(meta_auth::crypto::constant_time_is_zero(buffer.bytes()));
+
+    // The whole capacity, not just the used prefix. `bytes()` is empty after a
+    // wipe, so it would report success even if the last twelve bytes were
+    // still there; the check has to look at the storage itself.
+    const std::span<const std::byte> raw{buffer.data(), buffer.capacity};
+    META_AUTH_CHECK(meta_auth::crypto::constant_time_is_zero(raw));
+}
+
+META_AUTH_TEST("secret_buffer", "wipe_erases_bytes_written_through_data") {
+    // `data()` hands out a writable pointer, so a caller can fill the buffer
+    // without ever calling `assign` -- and `size()` stays zero the whole time.
+    // A wipe that erased only the used prefix would then erase nothing at all,
+    // and both it and the destructor would report success.
+    meta_auth::crypto::secret_buffer<32> buffer;
+    std::byte* const raw = buffer.data();
+    for (std::size_t index = 0; index < buffer.capacity; ++index) {
+        raw[index] = std::byte{0xAB};
+    }
+    META_AUTH_CHECK_EQ(buffer.size(), std::size_t{0});
+
+    buffer.wipe();
+
+    for (std::size_t index = 0; index < buffer.capacity; ++index) {
+        META_AUTH_CHECK_EQ(std::to_integer<std::uint8_t>(raw[index]), std::uint8_t{0});
+    }
 }
 
 META_AUTH_TEST("secret_buffer", "reassignment_does_not_leave_the_tail_behind") {
@@ -487,4 +527,32 @@ META_AUTH_TEST("secret_buffer", "reassignment_does_not_leave_the_tail_behind") {
     const std::span<const std::byte> raw{buffer.data(), buffer.capacity};
     META_AUTH_CHECK(meta_auth::crypto::constant_time_equal(raw.first(4), short_key));
     META_AUTH_CHECK(meta_auth::crypto::constant_time_is_zero(raw.subspan(4)));
+}
+
+META_AUTH_TEST("hmac", "destroy_leaves_no_key_derived_bytes") {
+    // `destroy()` promises to erase the key material the hasher holds, and the
+    // window that matters is construction -> finish(): before `finish()`, the
+    // inner hasher has already absorbed the inner padding block, so its
+    // working state is the compression of key material. A `destroy()` that
+    // erased only the two pads would leave that state -- a deterministic
+    // function of the key -- in an object the caller has just been told is
+    // clean.
+    //
+    // The assertion is the strongest available and needs no knowledge of the
+    // layout: after `destroy()` every byte of the object is zero.
+    const std::array<std::byte, 4> key{std::byte{0x0B}, std::byte{0x0B}, std::byte{0x0B},
+                                       std::byte{0x0B}};
+    meta_auth::crypto::hmac_sha256_hasher hasher{key};
+    hasher.update("no finish() call, which is the point");
+
+    hasher.destroy();
+
+    const std::span<const std::byte> raw = std::as_bytes(std::span{&hasher, 1});
+    std::size_t non_zero = 0;
+    for (const std::byte element : raw) {
+        if (element != std::byte{0}) {
+            ++non_zero;
+        }
+    }
+    META_AUTH_CHECK_EQ(non_zero, std::size_t{0});
 }

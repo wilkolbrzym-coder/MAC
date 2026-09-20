@@ -152,23 +152,36 @@ public:
 
     /// Copy the contents out. Explicit, because the caller is taking on the
     /// obligation to erase the destination.
-    void copy_to(std::span<std::byte> destination) const noexcept {
-        const std::size_t count = destination.size() < size_ ? destination.size() : size_;
-        for (std::size_t index = 0; index < count; ++index) {
+    ///
+    /// Returns false, having copied nothing, when the destination is smaller
+    /// than the secret. It does not truncate: `assign` refuses a source that
+    /// does not fit for the same reason, and a function that silently hands
+    /// back the first half of a key is worse than one that hands back nothing.
+    [[nodiscard]] auto copy_to(std::span<std::byte> destination) const noexcept -> bool {
+        if (destination.size() < size_) {
+            return false;
+        }
+        for (std::size_t index = 0; index < size_; ++index) {
             destination[index] = storage_[index];
         }
+        return true;
     }
 
     /// Erase now, without waiting for the destructor. Not constexpr: erasure
     /// is an operation on run-time storage.
+    ///
+    /// The whole capacity is erased, not just the used prefix. Two reasons,
+    /// and either alone would be enough: a shorter value assigned earlier
+    /// leaves its tail in the buffer, and `data()` hands out a writable
+    /// pointer, so a caller that filled the buffer through that pointer never
+    /// advanced `size_` and would otherwise be left with a secret that `wipe()`
+    /// and the destructor both skip.
     void wipe() noexcept {
-        secure_erase(std::span<std::byte>{storage_, size_});
+        secure_erase(std::span<std::byte>{storage_, Capacity});
         size_ = 0;
     }
 
 private:
-    // The whole capacity is erased, not just the used prefix: a shorter value
-    // assigned earlier would otherwise leave its tail behind.
     std::byte storage_[Capacity]{};
     std::size_t size_ = 0;
 };

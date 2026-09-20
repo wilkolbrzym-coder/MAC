@@ -126,9 +126,16 @@ public:
     /// Erase the key material this hasher holds. Called by the destructor;
     /// callable earlier by a caller that wants the window to be shorter.
     /// Not constexpr: erasure is an operation on run-time storage.
+    ///
+    /// The inner hasher is erased as well as the two pads. It has already
+    /// absorbed the inner pad, so its working state is the compression of key
+    /// material: erasing the pads alone would leave a value that is a
+    /// deterministic function of the key inside an object the caller has just
+    /// been told is clean.
     void destroy() noexcept {
         secure_erase(inner_pad_);
         secure_erase(outer_pad_);
+        inner_.destroy();
     }
 
 private:
@@ -141,9 +148,14 @@ private:
 [[nodiscard]] constexpr auto hmac_sha256(std::span<const std::byte> key,
                                          std::span<const std::byte> message) noexcept
     -> sha256_digest {
-    // The hasher's destructor is not constexpr (it erases the key material),
-    // so the one-shot form builds the pads itself and never leaves the key in
-    // a long-lived object.
+    // The key material is erased before returning, and the guard is what keeps
+    // the function usable in a `static_assert`: erasure is a run-time
+    // operation, and during constant evaluation there is nothing to erase.
+    //
+    // The one-shot form needs this as much as the streaming one. It leaves
+    // four derived buffers (the padded key and the two pads) and two hasher
+    // states on the stack, and this is the path `verify_hmac` takes -- the
+    // most-called function in the identity layer.
     std::array<std::byte, sha256_hasher::block_size> padded_key{};
 
     if (key.size() > sha256_hasher::block_size) {
@@ -175,7 +187,16 @@ private:
     outer.reset();
     outer.update(outer_pad);
     outer.update(std::span<const std::byte>{inner_digest.bytes.data(), inner_digest.bytes.size()});
-    return outer.finish();
+    const sha256_digest result = outer.finish();
+
+    if !consteval {
+        secure_erase_object(padded_key);
+        secure_erase_object(inner_pad);
+        secure_erase_object(outer_pad);
+        inner.destroy();
+        outer.destroy();
+    }
+    return result;
 }
 
 namespace detail {

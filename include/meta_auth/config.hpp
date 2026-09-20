@@ -29,11 +29,25 @@
 // The post-C++23 value of __cplusplus is how compilers spell "C++26" today;
 // the published standard value is not yet fixed, so the check is expressed as
 // "strictly newer than C++23" rather than against a magic number.
+//
+// MSVC reports 199711L from __cplusplus unless /Zc:__cplusplus is passed, and
+// the flag is not on by default: the compiler has been able to report the
+// truth since VS2017 15.7 and still does not, because changing it would break
+// code that sniffs the macro. The real level is in _MSVC_LANG, so that is what
+// the check uses when it is defined. Without this, every MSVC build fails the
+// #error below no matter how the command line is spelled -- which is a
+// confusing way to be told "this library needs C++26".
 // ---------------------------------------------------------------------------
+#if defined(_MSVC_LANG)
+#define META_AUTH_DIALECT_LEVEL _MSVC_LANG
+#else
+#define META_AUTH_DIALECT_LEVEL __cplusplus
+#endif
+
 #if !defined(__cplusplus)
 #error "meta-auth-core requires a C++ compiler; __cplusplus is not defined."
-#elif __cplusplus <= 202302L
-#error "meta-auth-core requires C++26. Compile with -std=c++26 (GCC 15+, Clang 21+) or newer. This library is built on contract assertions, static reflection, deleted functions with diagnostics and pack indexing; a pre-C++26 dialect cannot express its core invariants."
+#elif META_AUTH_DIALECT_LEVEL <= 202302L
+#error "meta-auth-core requires C++26. Compile with -std=c++26 (GCC 15+, Clang 21+) or /std:c++latest (MSVC 19.4x+). This library is built on contract assertions, static reflection, deleted functions with diagnostics and pack indexing; a pre-C++26 dialect cannot express its core invariants."
 #endif
 
 // ---------------------------------------------------------------------------
@@ -91,10 +105,22 @@
 // P2573 deleted functions with a diagnostic message: `= delete("reason")`.
 // This is what turns "you called an operation that does not exist in this
 // session state" into a sentence the developer can act on.
+//
+// Unlike contracts and reflection this one is *required*, not optional. The
+// library's rejections are its user interface -- a session that cannot act, a
+// capability that cannot be copied, a proof that cannot be fetched from
+// nowhere -- and without P2573 every one of them degrades to "no matching
+// function" and a page of candidate notes. The macro was defined and never
+// consulted, so a compiler without the feature produced a wall of syntax
+// errors instead of this sentence.
 #if defined(__cpp_deleted_function) && __cpp_deleted_function >= 202403L
 #define META_AUTH_HAS_DELETED_WITH_MESSAGE 1
 #else
 #define META_AUTH_HAS_DELETED_WITH_MESSAGE 0
+#endif
+
+#if META_AUTH_HAS_DELETED_WITH_MESSAGE == 0
+#error "meta-auth-core requires P2573 deleted functions with a diagnostic message (__cpp_deleted_function >= 202403L). GCC 15+, Clang 19+ and MSVC 19.40+ implement it. The library's diagnostics are built on it: every operation that a state, a policy or a capability forbids is reported by a sentence saying which one."
 #endif
 
 // C++26 fixed-capacity vector. The capability tables and the audit ring are

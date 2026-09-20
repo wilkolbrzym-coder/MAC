@@ -21,6 +21,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -145,6 +146,49 @@ META_AUTH_TEST("contract", "report_is_nul_terminated_when_it_fits") {
     META_AUTH_REQUIRE(text.size() < buffer.size());
     META_AUTH_CHECK_EQ(buffer[text.size()], '\0');
     META_AUTH_CHECK_EQ(std::string_view{buffer.data()}, text);
+}
+
+META_AUTH_TEST("contract", "a_report_that_exactly_fills_the_buffer_is_not_written_past") {
+    // The boundary the terminator logic got wrong -- and the one the check
+    // above could never see, because that check requires
+    // `text.size() < buffer.size()`, which excludes the only case that matters.
+    //
+    // A report whose length is exactly the buffer size is not truncated, so
+    // the branch that appends a terminator ran, and it wrote at
+    // `buffer[size]` -- one byte past the end. On the reference compiler that
+    // is not a quiet stray byte: libstdc++ 16 hardens `span::operator[]` by
+    // default, so the write aborts the process, on the fail-stop path whose
+    // entire purpose is to report a contract violation before stopping.
+    //
+    // Both ways of failing are failures: on a hardened standard library the
+    // process aborts, and on one without the hardening the sentinel below is
+    // clobbered.
+    const std::string_view condition = "oversized.left == oversized.right";
+    const std::string_view place = "capability/oversized.hpp:1";
+    const std::string_view function = "overflowing";
+
+    std::array<char, 1024> sizing{};
+    meta_auth::diag::violation_record probe{
+        .expression = condition,
+        .file = place,
+        .function = function,
+        .kind = meta_auth::diag::violation_kind::precondition,
+    };
+    const std::string_view rendered = meta_auth::diag::format_violation(probe, sizing);
+
+    // The buffer that fits the report exactly, with a sentinel after it. The
+    // sentinel is part of the same allocation on purpose: a byte past the end
+    // of a separate array is what AddressSanitizer catches, and this test has
+    // to mean something in a build without sanitizers too.
+    const std::size_t exact = rendered.size();
+    std::vector<char> storage(exact + 8, 'X');
+    const std::span<char> buffer{storage.data(), exact};
+
+    const std::string_view text = meta_auth::diag::format_violation(probe, buffer);
+    META_AUTH_CHECK_EQ(text.size(), exact);
+    for (std::size_t index = exact; index < storage.size(); ++index) {
+        META_AUTH_CHECK_EQ(storage[index], 'X');
+    }
 }
 
 META_AUTH_TEST("contract", "report_marks_truncation_instead_of_hiding_it") {

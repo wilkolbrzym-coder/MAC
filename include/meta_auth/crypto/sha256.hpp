@@ -27,6 +27,7 @@
 #include "meta_auth/config.hpp"
 #include "meta_auth/core/error.hpp"
 #include "meta_auth/core/fixed_string.hpp"
+#include "meta_auth/crypto/secure_erase.hpp"
 
 #include <array>
 #include <cstddef>
@@ -71,7 +72,13 @@ namespace detail {
 
 [[nodiscard]] constexpr auto rotate_right(std::uint32_t value, unsigned count) noexcept
     -> std::uint32_t {
-    return (value >> count) | (value << (32U - count));
+    // Masking rather than trusting the caller: shifting by 32 is undefined
+    // behaviour, and `count == 0` -- the one input every rotation is entitled
+    // to receive -- is exactly the shift that produces it. Every call site in
+    // this file passes a literal, so the mask is free; it is here so that a
+    // future call site cannot introduce UB into a hash function.
+    const unsigned amount = count & 31U;
+    return (value >> amount) | (value << ((32U - amount) & 31U));
 }
 
 /// FIPS 180-4, section 4.2.2: the first 32 bits of the fractional parts of the
@@ -238,6 +245,21 @@ public:
     constexpr void reset() noexcept {
         state_ = detail::sha256_initial_state;
         buffer_.fill(std::byte{0});
+        buffered_ = 0;
+        total_bytes_ = 0;
+    }
+
+    /// Erase the working state at run time. Not constexpr: erasure is an
+    /// operation on run-time storage, and during constant evaluation there is
+    /// no memory left behind.
+    ///
+    /// This exists for HMAC. The hasher absorbs the 64-byte inner padding
+    /// block, so `state_` holds the compression of key material; a caller that
+    /// erased the pads without erasing the state would leave a deterministic
+    /// function of the key in the object it believes it cleaned.
+    void destroy() noexcept {
+        secure_erase_object(state_);
+        secure_erase(std::span<std::byte>{buffer_});
         buffered_ = 0;
         total_bytes_ = 0;
     }
