@@ -469,12 +469,21 @@ struct registrar {
     ::meta_auth::test::detail::check(!(expression), "!(" #expression ")",            \
                                      std::source_location::current())
 
-/// Equality with both operands rendered. The lambda binds each operand once,
-/// so an operand with side effects is still evaluated exactly once.
+/// Equality with both operands rendered. The lambda evaluates each operand
+/// once and *copies* it, so the report shows the value the check was made
+/// against even if the operand is later mutated. The consequence is that
+/// CHECK_EQ requires copy-constructible operands; a move-only or expensive
+/// value is compared with CHECK instead.
+///
+/// The copy is not a style choice. Binding `const auto&` to the result of a
+/// call whose function declares a named-result postcondition makes GCC 16.0.1
+/// reject the contract condition as non-constant ("contract condition is not
+/// constant"), which would make this macro unusable with any function in the
+/// library that documents its result that way.
 #define META_AUTH_CHECK_EQ(lhs, rhs)                                                 \
     ([&]() -> bool {                                                                 \
-        const auto& meta_auth_lhs = (lhs);                                           \
-        const auto& meta_auth_rhs = (rhs);                                           \
+        const auto meta_auth_lhs = (lhs);                                            \
+        const auto meta_auth_rhs = (rhs);                                            \
         return ::meta_auth::test::detail::check_binary(                              \
             meta_auth_lhs == meta_auth_rhs, #lhs " == " #rhs,                        \
             ::meta_auth::test::stringify(meta_auth_lhs),                             \
@@ -484,8 +493,8 @@ struct registrar {
 
 #define META_AUTH_REQUIRE_EQ(lhs, rhs)                                               \
     ([&]() -> bool {                                                                 \
-        const auto& meta_auth_lhs = (lhs);                                           \
-        const auto& meta_auth_rhs = (rhs);                                           \
+        const auto meta_auth_lhs = (lhs);                                            \
+        const auto meta_auth_rhs = (rhs);                                            \
         return ::meta_auth::test::detail::check_binary(                              \
             meta_auth_lhs == meta_auth_rhs, #lhs " == " #rhs,                        \
             ::meta_auth::test::stringify(meta_auth_lhs),                             \
@@ -495,8 +504,8 @@ struct registrar {
 
 #define META_AUTH_CHECK_NE(lhs, rhs)                                                 \
     ([&]() -> bool {                                                                 \
-        const auto& meta_auth_lhs = (lhs);                                           \
-        const auto& meta_auth_rhs = (rhs);                                           \
+        const auto meta_auth_lhs = (lhs);                                            \
+        const auto meta_auth_rhs = (rhs);                                            \
         return ::meta_auth::test::detail::check_binary(                              \
             !(meta_auth_lhs == meta_auth_rhs), #lhs " != " #rhs,                     \
             ::meta_auth::test::stringify(meta_auth_lhs),                             \
@@ -508,8 +517,8 @@ struct registrar {
 /// operands and which way the comparison was expected to go.
 #define META_AUTH_CHECK_RELATION(lhs, op, rhs)                                       \
     ([&]() -> bool {                                                                 \
-        const auto& meta_auth_lhs = (lhs);                                           \
-        const auto& meta_auth_rhs = (rhs);                                           \
+        const auto meta_auth_lhs = (lhs);                                            \
+        const auto meta_auth_rhs = (rhs);                                            \
         const bool meta_auth_passed = (meta_auth_lhs op meta_auth_rhs);              \
         return ::meta_auth::test::detail::check_comparison(                          \
             meta_auth_passed, #lhs " " #op " " #rhs,                                 \

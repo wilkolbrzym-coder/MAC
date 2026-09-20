@@ -91,6 +91,13 @@ set(META_AUTH_WARNINGS_CPP
     -Wmaybe-uninitialized
 )
 
+# `-Wmissing-field-initializers` is deliberately absent. The library's records
+# carry defaults precisely so that a caller names the fields it means
+# (`violation_record{.expression = ..., .file = ..., .line = ...}`), and the
+# warning fires on exactly that idiom while `-Wextra` already reports the case
+# it was written for -- an aggregate initialised positionally and incompletely,
+# which this codebase never does.
+
 # `-Wswitch-default` is deliberately absent next to `-Wswitch-enum`. The two
 # together demand a `default:` label *and* a case for every enumerator, and a
 # `default:` label is precisely what silences the diagnostic that fires when a
@@ -127,6 +134,7 @@ function(meta_auth_configure_warnings target)
         # library; the diagnostic is therefore reported but not promoted.
         target_compile_options(${target} INTERFACE
             $<$<BOOL:${META_AUTH_WARNINGS_AS_ERRORS}>:-Werror>
+            -Wno-missing-field-initializers
             -Wno-error=inline
             -Wno-error=unsafe-loop-optimizations
             -Wno-error=disabled-optimization)
