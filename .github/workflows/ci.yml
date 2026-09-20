@@ -71,18 +71,15 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
+      # No ASLR workaround here, and the reason is recorded because the first
+      # version of this file had one: `setarch -R` was added pre-emptively for
+      # the shadow-memory mapping problem ThreadSanitizer has on kernels with
+      # high mmap randomisation, and it turned a passing job into a failing one
+      # -- the container blocks the personality syscall, so setarch failed
+      # before the tests ran. A workaround for a problem that has not been
+      # observed is a liability, not a precaution.
       - name: Test
-        run: |
-          if [ "${{ matrix.preset }}" = "tsan" ]; then
-            # ThreadSanitizer cannot reserve its shadow memory when the kernel
-            # is configured with the mmap randomisation newer Ubuntu kernels
-            # default to, and a container cannot change that with sysctl.
-            # Disabling ASLR for the test process is the documented workaround
-            # and does not weaken what the sanitizer checks.
-            setarch "$(uname -m)" -R ctest --preset tsan --output-on-failure
-          else
-            ctest --preset ${{ matrix.preset }} --output-on-failure
-          fi
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
       # The compile-failure suite is the negative half of the documentation's
       # claims, so it is asserted to have actually run rather than merely to
