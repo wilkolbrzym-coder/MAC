@@ -6,6 +6,11 @@ it.
 
 ## Building and testing
 
+Ninja is required: the presets pin it as the generator so that a build in a
+minimal container behaves the same as a build on a workstation. If you have
+already configured a build directory with another generator, delete it —
+CMake refuses to reuse a directory configured for a different one.
+
 ```sh
 cmake --preset dev               # configure
 cmake --build --preset dev       # build

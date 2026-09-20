@@ -13,7 +13,8 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "META_AUTH_WARNINGS_AS_ERRORS": "ON"
-      }
+      },
+      "generator": "Ninja"
     },
     {
       "name": "gcc-16",
@@ -23,7 +24,6 @@
         "CMAKE_CXX_COMPILER": "g++-16"
       }
     },
-
     {
       "name": "dev",
       "displayName": "Developer build (Debug, contracts + reflection, tests)",
@@ -105,23 +105,59 @@
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev" },
-    { "name": "release", "configurePreset": "release" },
-    { "name": "portable", "configurePreset": "portable" },
-    { "name": "asan", "configurePreset": "asan" },
-    { "name": "tsan", "configurePreset": "tsan" },
-    { "name": "coverage", "configurePreset": "coverage" },
-    { "name": "bench", "configurePreset": "bench", "configuration": "Release" }
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "portable",
+      "configurePreset": "portable"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "bench",
+      "configurePreset": "bench",
+      "configuration": "Release"
+    }
   ],
   "testPresets": [
     {
       "name": "base",
       "hidden": true,
-      "output": { "outputOnFailure": true, "verbosity": "default" },
-      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "default"
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
     },
-    { "name": "dev", "configurePreset": "dev", "inherits": "base" },
-    { "name": "portable", "configurePreset": "portable", "inherits": "base" },
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "inherits": "base"
+    },
+    {
+      "name": "portable",
+      "configurePreset": "portable",
+      "inherits": "base"
+    },
     {
       "name": "asan",
       "configurePreset": "asan",
@@ -143,7 +179,11 @@
       "name": "unit-only",
       "configurePreset": "dev",
       "inherits": "base",
-      "filter": { "include": { "label": "unit" } }
+      "filter": {
+        "include": {
+          "label": "unit"
+        }
+      }
     }
   ]
 }

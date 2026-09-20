@@ -143,7 +143,11 @@ docs/                architecture, threat model, models, decisions
 
 ## Building
 
-Requirements: a C++26 compiler. The reference configuration is **GCC 16**,
+Requirements: a C++26 compiler and Ninja (the presets pin the generator, so
+that a build behaves the same in a minimal container as it does locally — the
+first CI run failed in every job because the container image has no `make` and
+CMake's default generator is Unix Makefiles). The reference configuration is
+**GCC 16**,
 which implements the three dialect features the library is built on (contracts,
 static reflection, pack indexing). GCC 15 and Clang 21 build it with the
 optional features switched off; the test suite covers both configurations, and

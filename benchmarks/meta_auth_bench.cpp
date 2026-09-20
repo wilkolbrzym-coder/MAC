@@ -225,7 +225,20 @@ void benchmark_constant_time() {
     // deliberately loose -- this is a smoke test for "constant time", not a
     // side-channel analysis -- but it is a bound, and a change that turned the
     // comparison back into an early-exit loop would exceed it.
-    constexpr double allowed_relative_spread = 0.25;
+    //
+    // The bound is overridable so that a noisy shared runner can relax it
+    // without disabling the gate: a flaky security check is a check that gets
+    // switched off. What the bound is for survives the relaxation, because a
+    // return to an early-exit comparison is many times over it rather than
+    // marginally above it.
+    const double allowed_relative_spread = []() noexcept -> double {
+        const char* const configured = std::getenv("META_AUTH_BENCH_MAX_SPREAD");
+        if (configured == nullptr) {
+            return 0.25;
+        }
+        const double parsed = std::strtod(configured, nullptr);
+        return parsed > 0.0 ? parsed : 0.25;
+    }();
     if (relative > allowed_relative_spread) {
         std::printf("\nCONSTANT-TIME REGRESSION: the spread is %.1f%% of the fastest measurement, "
                     "above the %.0f%% bound.\n",
