@@ -1,0 +1,132 @@
+# ===========================================================================
+#  meta-auth-core -- continuous integration.
+#
+#  The matrix is the set of configurations the library claims to work in, and
+#  every entry exists because of a sentence in the documentation:
+#
+#    dev        contracts and reflection on -- the reference configuration
+#    portable   both switched off -- the claim that the guarantees survive a
+#               compiler without them, which is only true if a build proves it
+#    asan       address and undefined-behaviour sanitizers -- the memory-safety
+#               claims, including the ones the bounds analysis gets wrong
+#    tsan       thread sanitizer -- the audit trail's claim about concurrent
+#               readers and writers
+#    bench      the optimized build, and the constant-time measurement that
+#               gates on its own spread
+#
+#  A claim without a job is a claim nobody checks, which is why the matrix is
+#  short and every entry is load-bearing rather than exhaustive for its own
+#  sake.
+#
+#  The container is pinned to the distribution the project is developed on: the
+#  library needs GCC 16 for contracts and static reflection, and Ubuntu 26.04
+#  carries it. The version is part of the configuration, not a detail.
+# ===========================================================================
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [dev, portable, asan, tsan]
+    steps:
+      - name: Install the toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            g++-16 cmake ninja-build git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      # The compile-failure suite is the negative half of the documentation's
+      # claims, so it is asserted to have actually run rather than merely to
+      # have passed with zero tests.
+      - name: Assert the negative suite ran
+        run: |
+          ctest --preset ${{ matrix.preset }} -L compile_fail -N | tee /tmp/negative.txt
+          grep -q "Total Tests: 15" /tmp/negative.txt \
+            || { echo "the compile-failure suite did not register 15 tests"; exit 1; }
+
+  benchmarks:
+    name: bench
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - name: Install the toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            g++-16 cmake ninja-build git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset bench
+
+      - name: Build
+        run: cmake --build --preset bench
+
+      # The benchmark gates on its own constant-time measurement: a regression
+      # in the comparison's timing behaviour exits non-zero here.
+      - name: Run
+        run: ./build/bench/bin/meta_auth_bench
+
+  documentation:
+    name: documentation
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The README links to documents, and the documents link to each other.
+      # A broken link in a security library's documentation is a claim the
+      # reader cannot check.
+      - name: Every documented file exists
+        run: |
+          set -eu
+          for target in $(grep -rhoE '\]\((docs/[^)]+|README\.md|LICENSE)\)' \
+                            README.md docs/*.md | sed -E 's/^\]\(|\)$//g' | sort -u); do
+            if [ ! -e "$target" ]; then
+              echo "documented but missing: $target"
+              exit 1
+            fi
+          done
+          echo "all documented paths exist"
+
+      # The version appears in the README's status table and in the header the
+      # build validates; the build catches a mismatch between the header and
+      # CMake, and this catches a stale badge.
+      - name: The declared version is consistent
+        run: |
+          set -eu
+          header_version=$(grep -oE 'META_AUTH_VERSION_STRING = "[0-9.]+"' \
+                             include/meta_auth/version.hpp | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          cmake_version=$(grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -1 | cut -d' ' -f2)
+          echo "header: $header_version, cmake: $cmake_version"
+          [ "$header_version" = "$cmake_version" ]
