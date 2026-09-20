@@ -74,11 +74,16 @@ time, no exceptions on the hot path, no allocation in the audit trail.
 ## Quick start
 
 ```sh
-cmake --preset dev              # configure (GCC 16, contracts + reflection)
+cmake --preset dev              # configure with the host compiler
 cmake --build --preset dev      # build the tests, the examples and the probe
 ctest --preset dev              # run everything, including the negative suite
 ./build/dev/bin/meta_auth_demo  # the whole model, end to end
 ```
+
+`dev` uses whatever C++26 compiler the machine has, so the first command works
+on Linux, macOS and Windows alike. `dev-gcc16` is the pinned reference
+configuration in which every optional dialect feature is on; it is what CI runs
+and what the guarantees in this README are argued from.
 
 ## What the library does
 
@@ -99,7 +104,9 @@ authority<devices, rights_set::all()> root;
 auto strong = root.mint<rights_set::all()>();
 auto handed_out = strong.delegate<rights_set{right::read}>();            // needs right::grant
 
-// 4. A protected operation demands a policy proof *and* a capability.
+// 4. A protected operation demands a policy proof *and* a capability. The
+//    proof carries the principal it was issued for, so it cannot be
+//    presented under another identity.
 auto proof = authorize<policy, operator_principal,                             // consteval:
                        resource_kind::devices, action::modify>();              // denial does not compile
 registry.write<rights_set::all(), operator_principal>(strong, std::move(proof), gate, 0x5678U);
@@ -114,11 +121,17 @@ revoke_all<devices>();
 | --- | --- | --- |
 | A capability cannot be forged | private constructor, `authority` is the only friend | `compile_fail/capability_construct.cpp` |
 | A capability cannot be duplicated | deleted copy operations; `delegate` needs `grant` | `compile_fail/capability_copy.cpp` |
+| Attenuation consumes what it weakens | the source is neutralised, and the gate refuses a spent value | `tests/capability/test_capability.cpp` |
 | Authority is monotonically non-increasing | `requires (Requested ⊆ Held)` on `attenuate`/`delegate` | `compile_fail/capability_amplify.cpp`, exhaustive lattice tests |
 | A revoked capability is refused | epoch comparison at the gate, one atomic increment to revoke | `tests/capability/test_revocation.cpp` |
-| An illegal session transition does not exist | `requires` on the transition + `= delete("...")` | `compile_fail/session_*.cpp` (4 cases) |
+| An illegal session transition does not exist | `requires` on the transition + `= delete("...")` | `compile_fail/session_*.cpp` (6 cases) |
+| A session state cannot be fabricated | the core is a non-aggregate with no public constructor | `compile_fail/session_forged_state.cpp` |
 | A denied request does not compile | `consteval` policy evaluation + constrained `authorize` | `compile_fail/policy_denied_request.cpp` |
+| A policy proof cannot be forged | non-trivially-copyable, private constructor | `static_assert` in `auth/policy.hpp` |
+| A proof names the principal it was issued for | the gate takes the principal and the proof in one signature | `compile_fail/gate_proof_for_another_principal.cpp` |
+| A rule cannot name a principal by accident | `static_assert` on every rule's pattern | `compile_fail/policy_bare_principal_rule.cpp` |
 | No resource is left without a policy | `static_assert` inside `policy`, driven by reflection | `compile_fail/policy_missing_rule.cpp` |
+| The policy's decisions are what it documents | 3 × 5 × 6 decision matrix asserted at compile time | `tests/auth/test_auth.cpp` |
 | A device is trusted only if compiled in | `trust_store<digests...>` as a non-type template parameter | `tests/identity/test_identity.cpp` |
 | Secret comparison does not leak by timing | accumulate-and-compare with an optimisation barrier | `benchmarks/` measures the spread, and gates on it |
 | The audit trail is readable while written | stamped slots, relaxed atomics | `tests/sandbox/test_sandbox.cpp` under ThreadSanitizer |
@@ -146,15 +159,35 @@ docs/                architecture, threat model, models, decisions
 Requirements: a C++26 compiler and Ninja (the presets pin the generator, so
 that a build behaves the same in a minimal container as it does locally — the
 first CI run failed in every job because the container image has no `make` and
-CMake's default generator is Unix Makefiles). The reference configuration is
-**GCC 16**,
-which implements the three dialect features the library is built on (contracts,
-static reflection, pack indexing). GCC 15 and Clang 21 build it with the
-optional features switched off; the test suite covers both configurations, and
-`ctest --preset portable` is the configuration that proves it.
+CMake's default generator is Unix Makefiles. The Visual Studio preset is the
+one exception, and it exists so that a Windows machine needs neither).
+
+The library requires **P2573 deleted functions with a message** — `=
+delete("reason")`, reported as `__cpp_deleted_function >= 202403L` by GCC 15+,
+Clang 19+ and MSVC 19.40+. That is a floor, not an option: the diagnostics are
+the library's user interface, and without the feature every rejection degrades
+to "no matching function". `config.hpp` says so in one sentence rather than
+letting the compiler produce a page of syntax errors.
+
+Contracts and static reflection are *optional* and are probed:
+
+| Configuration | Compiler | Contracts | Reflection | Verified |
+| --- | --- | --- | --- | --- |
+| reference | GCC 16 | yes | yes | `ctest --preset dev-gcc16`, green |
+| portable | GCC 15 | no | no | `ctest --preset dev` on GCC 15, green |
+| portable | Clang 19+ | no | no | CI job `linux/clang` |
+| portable | AppleClang (Homebrew LLVM) | no | no | CI job `macos/portable` |
+| portable | MSVC 19.40+ | no | no | CI job `windows/msvc` |
+
+"Verified" means a green run, and the last three rows are green only in CI: the
+machine this was written on has GCC 15 and GCC 16, and the other compilers were
+made to work by construction rather than by observation. `docs/testing.md` lists
+that among the known gaps rather than burying it.
 
 Presets: `dev`, `portable` (no contracts, no reflection), `release`, `asan`,
-`tsan`, `coverage`, `bench`. See `CMakePresets.json`.
+`tsan`, `coverage`, `bench`, `dev-gcc16`, `portable-gcc16`, `dev-clang`,
+`windows-msvc`. The unsuffixed ones use the host toolchain; the suffixed ones
+pin it. See `CMakePresets.json`.
 
 There are no third-party dependencies, at build time or in the headers. The
 library is an INTERFACE target; vendoring `include/meta_auth/` into an existing

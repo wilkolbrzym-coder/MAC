@@ -10,7 +10,198 @@ Because the library is header-only, the version that matters is the one in
 
 ## [Unreleased]
 
-Nothing yet.
+An adversarial review of the whole tree, and the changes it produced. The
+security-relevant entries are first, because the rest are ordinary engineering
+and those are not.
+
+### Fixed
+
+**Security**
+
+* **A session state could be fabricated.** `detail::session_core` was an
+  aggregate with public members and a public `create()`, and `session`'s
+  constructor took one, so
+  `session<admin_principal, session_state::elevated>{detail::session_core{}}`
+  produced a fully elevated session for the administrator with no credential and
+  no second factor. It compiled, and it did not look like a bypass. The core is
+  now a class with private constructors, a deleted default constructor carrying
+  a message, and user-provided copy and move operations so that `std::bit_cast`
+  cannot fabricate one either. `compile_fail/session_forged_state.cpp`.
+* **A policy proof could be forged with `std::bit_cast`.** `authorization` was
+  an empty class with a defaulted move constructor, which made it trivially
+  copyable, so `std::bit_cast<authorization<R, A>>(std::array<std::byte, 1>{})`
+  produced a valid-looking proof without `authorize` ever being evaluated — the
+  one line that defeated "a denied request does not compile". The move
+  constructor is now user-provided, which makes the class non-trivially
+  copyable, and two `static_assert`s in `auth/policy.hpp` hold the property.
+* **A proof was not bound to a principal.** `authorization` carried a resource
+  and an action, and `gate::admit` took the principal as a free template
+  argument, so a proof obtained for one principal could be presented by an
+  admission naming another — and the audit record then said the *other*
+  principal acted. The proof now carries its principal and `admit` takes it in
+  both positions, so the two must agree.
+  `compile_fail/gate_proof_for_another_principal.cpp`.
+* **A rule could name a principal and mean its whole kind.**
+  `pattern_matches` discriminated on `requires { Pattern::kind; }`, and every
+  `principal<Name, Kind>` has a `static constexpr principal_kind kind`, so
+  `allow<devices, revoke, admin_principal>` meant "any principal of kind user
+  may revoke" — one principal written, all of them authorised. A rule's pattern
+  is now checked where the rule is written, and a bare principal type is a
+  compile error naming the two spellings that exist.
+  `compile_fail/policy_bare_principal_rule.cpp`.
+* **`attenuate` did not consume what it weakened.** The documentation said that
+  after attenuation there is exactly one capability and it is the weaker one,
+  and that duplication requires `delegate` — which requires `right::grant`. The
+  source was left fully usable, so *any* capability could be duplicated without
+  `grant`. Capabilities now carry a validity flag, `attenuate` and the move
+  operations neutralise their source, `has` and `is_live` report a spent value
+  as holding nothing, and the gate refuses it with a distinct audit outcome
+  (`denied_neutralised`) and error (`capability_neutralised`).
+* **The one-shot HMAC did not erase anything.** It left the padded key and both
+  pads on the stack, and the streaming hasher's `destroy()` erased only the
+  pads — not the inner hasher's state, which is the compression of the inner
+  padding block and therefore a deterministic function of the key. Both forms
+  now erase everything they derived, and `sha256_hasher` has a `destroy()` for
+  the state. `hmac_test_case` in `tests/crypto/test_crypto.cpp` asserts that
+  every byte of the hasher is zero after `destroy()`.
+* **`secret_buffer::wipe` erased only the used prefix.** `data()` hands out a
+  writable pointer, so a caller that filled the buffer through it never
+  advanced `size_` and `wipe()` — and the destructor — erased nothing. The
+  whole capacity is erased now, and `copy_to` refuses a destination that cannot
+  hold the secret instead of silently truncating it.
+* **`revoke_all`'s epoch slot and the serial counter were handed out as mutable
+  references** by `detail::epoch_slot` and `detail::serial_slot`. The threat
+  model puts "code with write access to the process" out of scope, but a
+  mutable reference to the epoch means a revocation can be *undone* by code that
+  only reads the API. Both remain in `detail`, and the guarantee is now stated
+  with its boundary in `docs/threat-model.md` rather than assumed.
+
+**Correctness and memory safety**
+
+* **`format_violation` wrote one byte past the end of its buffer** when the
+  report exactly filled it: `result.size == buffer.size()` is not truncation,
+  so the terminator branch ran and wrote at `buffer[size]`. On GCC 16 this is
+  not a stray byte — libstdc++ hardens `span::operator[]` and the write aborts
+  the process, on the fail-stop path whose purpose is to report a violation
+  before stopping. The comparison is `>=` and the terminator is written only
+  when there is room. `tests/core/test_contract.cpp` sizes a record to land
+  exactly on the boundary.
+* **`hmac_sha256`'s comment described a destructor that is `constexpr` as
+  non-`constexpr`**, which is why the one-shot form was believed to need no
+  erasure. The comment is corrected and the erasure added.
+* **`detail::rotate_right(v, 0)` was undefined behaviour** (a shift by the width
+  of the type). Unreachable from the current call sites, and now unreachable
+  from any future one.
+* **`constant_time_select` accepted `bool`**, for which `std::make_unsigned_t`
+  is ill-formed: the diagnostic was a hard error inside the library rather than
+  a constraint failure naming the caller's argument.
+* **`constant_time_mask` returned 0 or 1, not a mask.** Renamed
+  `constant_time_bit`, which is what it returns.
+* **The MSVC fallback in `optimization_barrier` wrote a plain `volatile`
+  counter from every thread**, which is a data race — in the one place in this
+  library where a defect is invisible. It is an atomic relaxed RMW now.
+* **`fixed_string::contains` used `std::string_view::find`, which is not a
+  constant expression in libstdc++ 15 or in the libc++ shipped with recent
+  Apple toolchains.** The three predicates are explicit loops now, which is what
+  makes the test suite build on GCC 15 — the README claimed it did, and it did
+  not.
+* **`test_error.cpp` hard-coded the number of `auth_error` enumerators** as a
+  literal array extent, so adding one made the reflective walk index past the
+  end and the test that exists to catch an unhandled enumerator failed for an
+  unrelated reason. The count comes from reflection.
+* **`MSVC` was rejected by the dialect floor** because `config.hpp` tested
+  `__cplusplus`, which MSVC reports as `199711L` unless `/Zc:__cplusplus` is
+  passed. The check uses `_MSVC_LANG` where it exists.
+
+**Tests**
+
+* **A misspelled option made the test runner exit 0.** `--filtr=...` printed the
+  usage text and *passed*, so a CI job that mistyped a filter ran the whole
+  suite and reported success. An unknown argument is now exit 3.
+  `framework.unknown_argument_is_an_error` asserts the status and the message.
+* **The compile-failure suite did not check the reason it claimed to.**
+  `expected/capability_copy.txt` required `use of deleted function` and the
+  substring `capability`, which the other fourteen cases also satisfied;
+  matching was done with `MATCHES`, so the parentheses in a C++ signature were
+  regex groups and stopped matching themselves. Expectations are now literal
+  substrings split into a portable half (the sentences this library writes) and
+  a per-compiler half (the compiler's own spelling), and each was checked
+  against the other cases' sources to confirm it rejects them.
+* **`expected_decision` in `tests/auth/test_auth.cpp` was dead code.** A comment
+  claimed the decision matrix was asserted over every combination; what ran was
+  a check that the evaluator honours its own rules, which a policy that allowed
+  too much satisfies perfectly. The 3 × 5 × 6 matrix is asserted now, and
+  widening one rule makes the build fail.
+* **`serials_are_unique_per_resource` could not see a shared counter.** Its
+  assertions (`>= 64`, `>= 1`) are satisfied by one global sequence. A resource
+  used nowhere else makes the counter's origin observable.
+* **The revoked-session and bare-principal rejections had no message**, so they
+  reported "no matching function" and a page of candidates. Both are now
+  `= delete("...")` overloads, which is also what makes the negative suite
+  portable: the message is the library's, not the compiler's.
+
+### Changed
+
+* **The presets no longer pin GCC 16.** `cmake --preset dev` uses the host
+  toolchain, so the first command in the README works on Linux, macOS and
+  Windows. `dev-gcc16` and `portable-gcc16` are the pinned reference
+  configurations CI runs; `dev-clang` and `windows-msvc` cover the other
+  front ends.
+* **Every hardening flag is probed.** `-fstack-clash-protection` and
+  `-fcf-protection=full` were added unconditionally, which is correct on x86
+  GNU/Linux and wrong everywhere else: Apple's clang rejects `-fcf-protection`
+  outright for an arm64 target, so the build failed in the toolchain before it
+  reached the library.
+* **The warning set is three sets, not one.** Clang gets a validated subset,
+  MSVC gets `/W4 /permissive- /Zc:__cplusplus` and the numbered `/w14xxx`
+  diagnostics that correspond to `-Wconversion` and `-Wshadow`, and GCC keeps
+  its curated list. `-Werror`/`/WX` is scoped with `$<BUILD_INTERFACE:...>`, so
+  a project that finds the package no longer inherits it — and the build no
+  longer claims "warnings as errors" on compilers where that was not true.
+* **Sanitizer and coverage flags are compiler-aware**, and an unsupported
+  request warns instead of silently producing an uninstrumented build that a CI
+  job would report as sanitized.
+* **`Threads::Threads` is linked explicitly.** The concurrency tests construct
+  `std::thread`, which resolved here only because this machine's glibc merged
+  libpthread.
+* **The compile-failure driver speaks three dialects** (`-fsyntax-only` against
+  `/Zs`, `error:` against `error C####:`), and the family-specific expectations
+  live in `expected/<case>.<family>.txt`.
+* `cmake/MetaAuthSanitizers.cmake` no longer creates its global target
+  unconditionally, and `TIMEOUT` has a default instead of passing an empty
+  string to `set_tests_properties`.
+* `required_right` falls through to `right::revoke` rather than `right::read`
+  for an unmapped action: unreachable, and if it stops being unreachable the
+  failure is a demand for the strongest right rather than the weakest.
+* `version_packed()` masks its fields, so a component above 255 cannot carry
+  into the next one.
+* `META_AUTH_WEAK_SYMBOL` is `#undef`ed at the end of the header that defines
+  it, instead of leaking a generic name into every translation unit.
+
+### Added
+
+* Six new programs to the compile-failure suite, for the five rejections above
+  plus a session that acts after revocation.
+* Tests for attenuation consuming its source, for a moved-from capability being
+  refused by the gate, for `secret_buffer` erasing its whole capacity, for
+  `destroy()` leaving no derived key material in an HMAC hasher, and for the
+  policy's decision matrix.
+* CI jobs for GCC 15, Clang, macOS (Homebrew LLVM) and Windows (MSVC), and a
+  `documentation` job that no longer needs a `git` binary it does not install.
+  The reference container stays pinned to Ubuntu 26.04 and GCC 16.
+
+### Documented
+
+* `docs/testing.md` states how the negative suite is split, why the matching is
+  literal, and — under "Known gaps" — that Clang, AppleClang and MSVC have not
+  been run on the machine this was developed on, that the audit trail's seqlock
+  bounds the number of concurrent writers, and that revocation is not
+  transactional with the operation it revokes.
+* `sandbox/audit.hpp` states that bound next to the claim it qualifies, rather
+  than leaving the reader to infer it.
+* `README.md` no longer claims that GCC 15 and Clang 21 build the library; it
+  says which configurations have been run and where.
+
 
 ## [0.1.0] — 2026-09-20
 

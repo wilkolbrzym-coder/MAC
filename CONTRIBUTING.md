@@ -12,17 +12,24 @@ already configured a build directory with another generator, delete it —
 CMake refuses to reuse a directory configured for a different one.
 
 ```sh
-cmake --preset dev               # configure
+cmake --preset dev               # configure with the host toolchain
 cmake --build --preset dev       # build
 ctest --preset dev               # run everything
 ctest --preset dev -L unit       # one group
 ```
 
+The unsuffixed presets use whatever compiler the machine provides, so the first
+command works on every platform. `dev-gcc16` and `portable-gcc16` pin the
+reference toolchain and are what CI runs; `dev-clang` and `windows-msvc` cover
+the other front ends. Use the pinned ones when you need the configuration the
+guarantees are argued from, and the unsuffixed ones while working.
+
 Presets, and when to use each:
 
 | Preset | Use it when |
 | --- | --- |
-| `dev` | Always. Contracts and reflection on, tests and examples built. |
+| `dev` | Always. Host compiler, every optional dialect feature it supports, tests and examples built. |
+| `dev-gcc16` | When you need the reference configuration: contracts and reflection both on. |
 | `portable` | Before pushing. Both optional dialect features off; the same suite must pass. |
 | `asan` | Before pushing a change that touches memory. Address and UB sanitizers. |
 | `tsan` | Before pushing a change that touches the audit trail or any of the revocation counters. |
@@ -44,13 +51,23 @@ cannot be checked. A claim with none of those is a comment that will be wrong
 within a year.
 
 **Every rejection has a negative test.** If a program is supposed to be
-ill-formed, `tests/compile_fail/` contains it, and the expectation file records
-the *reason* — the fragment of the diagnostic that states why. Adding one is a
+ill-formed, `tests/compile_fail/` contains it, and the expectation files record
+the *reason* — the fragments of the diagnostic that state why. Adding one is a
 three-step ritual and the ritual is the point:
 
 1. write the program that should be rejected;
 2. compile it by hand and read the diagnostic;
-3. record the fragment that states the reason.
+3. record the fragment that states the reason — in `expected/<case>.txt` if the
+   fragment is one of this library's own sentences (which every compiler prints
+   verbatim), and in `expected/<case>.<family>.txt` if it is the compiler's
+   spelling of it.
+
+The preferred fragment is the library's own wording, because that is what makes
+the suite portable. When a rejection was previously left to the compiler to
+describe — "no matching function" and a page of candidates — the improvement is
+usually to add a `= delete("...")` overload that says what is wrong, and then to
+record that sentence. `docs/testing.md` has the details, including why the
+matching is literal rather than a regular expression.
 
 **Comments explain why.** The code says what it does. A comment that restates
 the next line is noise; a comment that records the constraint the code cannot

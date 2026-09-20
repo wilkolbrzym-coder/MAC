@@ -83,8 +83,18 @@ land on `main`.
 ## Compiler support and its consequences
 
 The guarantees are strongest on GCC 16, which implements the three dialect
-features the library is built on. Two of them are optional, and the library
-degrades — visibly, and without losing the rejections — when they are absent:
+features the library is built on. One of them is required and two are optional.
+
+**Required: P2573 deleted functions with a message** (`= delete("reason")`,
+`__cpp_deleted_function >= 202403L` — GCC 15+, Clang 19+, MSVC 19.40+). The
+diagnostics are the library's user interface: every operation that a state, a
+policy or a capability forbids is rejected by a sentence saying which one. On a
+compiler without the feature that degrades to "no matching function" and a page
+of candidates, which is why `config.hpp` refuses to compile rather than letting
+the suite's negative half quietly stop asserting anything.
+
+The two optional features are probed, and the library degrades — visibly, and
+without losing the rejections — when they are absent:
 
 | Configuration | What changes |
 | --- | --- |
@@ -93,7 +103,12 @@ degrades — visibly, and without losing the rejections — when they are absent
 | Reflection on | `resource_kind_count` is derived from the enumeration, and the policy exhaustiveness check cannot drift from it |
 | Reflection off | `resource_kind_count` is a hand-maintained constant, and the test suite asserts it agrees with reflection in every build that has reflection — so the fallback is verified where it can be, rather than assumed everywhere |
 
-`ctest --preset portable` runs the same suite, including all sixteen
-compile-failure cases, in the configuration without either feature. If a
-guarantee held only in the reference configuration, that preset is where it
+`ctest --preset portable` runs the same suite, including all eighteen
+compile-failure cases, in the configuration without either optional feature. If
+a guarantee held only in the reference configuration, that preset is where it
 would show up.
+
+What has been *run*, as opposed to argued: GCC 15 and GCC 16 on Linux, both
+configurations, plus the sanitizer configurations. Clang, AppleClang and MSVC
+are covered by CI jobs and have not been run on the machine this was developed
+on; `docs/testing.md` lists that under its known gaps rather than in a footnote.

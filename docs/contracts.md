@@ -190,9 +190,24 @@ Two instantiations of one class template therefore cannot reach each other's
 private constructors on this compiler.
 
 **The rule:** the session states share their identity through a
-`detail::session_core` value that a transition hands to the next state. The
-bypass of the state machine is expressible only by naming `detail`, which is
-where a reviewer will see it.
+`detail::session_core` value that a transition hands to the next state.
+
+That reasoning -- "the bypass is expressible only by naming `detail`" -- was
+wrong, and the review that found it also found the program it permitted:
+`session_core` was an aggregate with a public `create()`, so
+
+```cpp
+session<admin_principal, session_state::elevated>{detail::session_core{}}
+```
+
+was a fully elevated session for the administrator, with no credential and no
+second factor, in a line that does not look like a bypass. Naming `detail` was
+never the protection; it only made the bypass *visible* to a reader who already
+knew what to look for. The core is now a class with private constructors that
+`create()` alone can reach, a deleted default constructor that says so, and
+user-provided copy and move operations so that `std::bit_cast` cannot fabricate
+one either. `compile_fail/session_forged_state.cpp` is the program above, and it
+no longer compiles.
 
 ### 7. Two false out-of-bounds reports in the optimised build
 

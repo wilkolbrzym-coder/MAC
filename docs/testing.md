@@ -15,7 +15,7 @@ test is a claim this project does not make.
 | --- | --- | --- |
 | `dialect` | The compiler configuration is what the rest of the suite assumes | `tests/dialect/` |
 | `unit` | One component behaves as documented | one directory per layer |
-| `compile_fail` | Sixteen programs stay ill-formed, for the documented reason | `tests/compile_fail/` |
+| `compile_fail` | Eighteen programs stay ill-formed, for the documented reason | `tests/compile_fail/` |
 | `concurrency` | Claims about shared mutable state | `tests/capability/test_revocation.cpp`, `tests/sandbox/test_sandbox.cpp` |
 | `fail_stop` | Processes that must die in a documented way | `tests/core/CMakeLists.txt`, `tests/framework/CMakeLists.txt` |
 | `integration` | The layers wired together | `examples/meta_auth_demo.cpp` |
@@ -41,18 +41,51 @@ later "all tests passed" into an unsupported claim:
   case, that a failed `REQUIRE` abandons the case at that point (asserted by the
   check count), and that a filter matching nothing is an error rather than a
   green run;
-* an unknown command-line flag asks for help rather than being ignored, because
-  a CI job that passes `--filtr=...` and gets a full green run is a job that
-  tested nothing.
+* an unknown command-line flag *fails the run* (exit 3) rather than being
+  ignored or mistaken for a request for help, because a CI job that passes
+  `--filtr=...` and gets a full green run is a job that tested nothing. It used
+  to print the usage text and exit 0, which was that green run, one keystroke
+  away.
 
 ## The compile-failure suite
 
-`tests/compile_fail/` holds sixteen programs that must not compile, each with an
-expectation file recording the fragment of the diagnostic that states the
+`tests/compile_fail/` holds eighteen programs that must not compile, each with
+an expectation file recording the fragment of the diagnostic that states the
 reason. `cmake/MetaAuthCompileFail.cmake` compiles each one, requires the
 compilation to fail, requires the diagnostic to contain the recorded fragment,
 and — importantly — rejects an environmental failure, so a missing header
 cannot make every negative test pass vacuously.
+
+### Two files per case, and why
+
+An expectation is split in two:
+
+| File | Holds | Example |
+| --- | --- | --- |
+| `expected/<case>.txt` | the portable half: the sentences this library writes into its own `= delete("...")` declarations, plus at most one token all compilers agree on | `A capability cannot be copied. Authority is handed on with delegate` |
+| `expected/<case>.<family>.txt` | the compiler's own spelling, where the families disagree | `use of deleted function`, `static assertion failed` |
+
+`<family>` is `gcc`, `clang` or `msvc`. The two sets of lines are concatenated
+and all of them are required, so the portable half is the contract and the
+family half is the precision.
+
+The split exists because one file of GCC spellings is a suite that reports a
+green run on the compiler it was written for and an unintelligible failure
+everywhere else — which is how a negative suite ends up deleted rather than
+fixed. It also forced a real improvement in the library: the messages a
+rejected program prints are now written by *this* library, in sentences that
+say what is wrong, instead of being left to the compiler to describe. A
+consequence worth knowing is that the negative suite is the strictest test of
+the library's own wording that exists — a reworded diagnostic breaks it, and
+that is the point.
+
+Matching is *literal* (`string(FIND`), not a regular expression. The expected
+text is C++ source, and C++ source is full of regex metacharacters:
+`capability(const capability<R, Rights>&)` as a regex means "capability
+immediately followed by `const capability<R, Rights>&`" — the parentheses
+become a group and stop matching themselves, so the check silently stops
+checking. That is not hypothetical; it is what the first version of this driver
+did.
 
 Adding one is a three-step ritual, and the ritual is the point:
 
@@ -64,13 +97,15 @@ Deleting a line from an expectation file is how a reviewer acknowledges that a
 previously rejected program became legal.
 
 The suite runs in **both** configurations. `ctest --preset portable` compiles
-the same sixteen programs without `-fcontracts` and without `-freflection`,
+the same eighteen programs without `-fcontracts` and without `-freflection`,
 which is what makes "the guarantees do not depend on the optional dialect
-features" a checked statement. Two cases behave differently there — the
-`capability_construct` and revoked-session cases report "no matching function"
-in both, but the deleted-overload messages that depend on contract diagnostics
-are only present with contracts — and the expected fragments are chosen so that
-each configuration asserts what it can.
+features" a checked statement: the rejections come from the type system and
+from `requires` clauses, not from contract assertions.
+
+CI asserts that the number of registered negative tests equals the number of
+sources, so a case that was added to the directory but not to the list — or a
+list entry whose source was deleted — is a build failure rather than a quiet
+loss of coverage.
 
 ## Fail-stop tests
 
@@ -143,6 +178,9 @@ weaker implementation would violate:
 ## Running the whole matrix locally
 
 ```sh
+# The presets without a suffix use whatever compiler the host provides, so this
+# loop works on any platform. `dev-gcc16` / `portable-gcc16` are the pinned
+# reference configurations CI runs.
 for preset in dev portable asan tsan; do
     cmake --preset "$preset" && cmake --build --preset "$preset" \
         && ctest --preset "$preset" --output-on-failure || echo "$preset FAILED"
@@ -150,10 +188,9 @@ done
 cmake --preset bench && cmake --build --preset bench && ./build/bench/bin/meta_auth_bench
 ```
 
-That is what CI runs, in the same pinned container. If it passes locally and
-fails in CI, the difference is the machine, and the first thing to look at is
-the constant-time benchmark's spread — it is the only measurement in the suite
-that depends on the hardware.
+If it passes locally and fails in CI, the difference is the machine, and the
+first thing to look at is the constant-time benchmark's spread — it is the only
+measurement in the suite that depends on the hardware.
 
 ## Known gaps
 
@@ -163,6 +200,24 @@ to assume it misses nothing.
 * **`-fno-exceptions` is not exercised.** The library throws nothing, so it
   should compile with exceptions disabled, and no preset proves it. The claim is
   therefore not made in `SECURITY.md`.
+* **Clang, AppleClang and MSVC have not been run on the machine this was
+  developed on.** GCC 15 and GCC 16 have: `ctest --preset dev` and
+  `--preset dev-gcc16` are green on both, and GCC 15 was the configuration in
+  which the `fixed_string::contains` and `-Werror=noexcept` defects were found.
+  The other compilers are covered by CI jobs — `linux/clang`, `macos/portable`
+  (Homebrew LLVM, because Apple's clang predates P2573) and `windows/msvc` — and
+  until those have run, "portable" means "portable by construction and by CI",
+  not "portable as measured here".
+* **The audit trail's seqlock bounds the number of concurrent writers.** Up to
+  `capacity` (256) writers sharing a slot is impossible; beyond that the
+  protocol assumes a single writer per slot and a reader could accept a mixed
+  record. The bound is stated in `sandbox/audit.hpp` next to the claim, and the
+  tests exercise dozens of threads, not hundreds.
+* **Revocation is not transactional with the operation it revokes.** A
+  revocation that lands between `admit` returning and the operation being
+  performed is not observed by that operation, so a capability can be used once
+  more in that window. `docs/threat-model.md` states this rather than claiming
+  otherwise; closing it needs an epoch guard held across the operation.
 * **No fuzzing.** The descriptor decoder, the hex parser and the policy
   evaluator are all total functions over their input domains and are tested
   exhaustively over small domains, but nothing feeds them random bytes. The

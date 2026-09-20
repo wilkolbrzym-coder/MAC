@@ -51,6 +51,18 @@ Every one of those becomes a move or a `delegate`, which is the intended
 friction — but it is friction, and code that wants a capability table has to
 build one explicitly.
 
+**Amended after review.** "Duplication requires `delegate`" was false as written.
+`attenuate() &&` read the source's serial and epoch and left the source fully
+usable, so `std::move(strong).attenuate<weaker>()` produced *two* live
+capabilities without `grant` — the affine property and the `grant` requirement
+were both bypassable by the operation that was supposed to consume its
+argument. Capabilities now carry a validity flag that `attenuate` and the move
+operations clear, `has` and `is_live` report a spent value as holding nothing,
+and the gate refuses one with its own audit outcome rather than reading the
+fields it still carries. The type is unchanged by attenuation — `Rights` is a
+compile-time constant — which is exactly why the check had to move into the
+value.
+
 ---
 
 ## D3 — Revocation by epoch, not by list
@@ -95,6 +107,18 @@ makes a stolen token dangerous, is not represented at all.
 that mean different things, and a caller has to understand both. The
 `protected_object` API makes that visible at every call site — which is the
 point, and it is verbose.
+
+**Amended after review.** The two mechanisms were not connected to each other or
+to a subject. `authorization` carried a resource and an action but not the
+principal it was issued for, so `gate::admit<Action, Rights, SomebodyElse>`
+accepted a proof obtained for anyone — and wrote `SomebodyElse` into the audit
+record, which is a stolen token that also signs the victim's name. The proof now
+carries its principal and `admit` takes that principal in the same position, so
+the two must agree; and the proof is no longer trivially copyable, because
+`std::bit_cast<authorization<...>>(std::array<std::byte, 1>{})` used to produce
+one without the policy being evaluated at all. Possession plus a policy decision
+*for somebody* is not authorisation; possession plus a policy decision for the
+principal who is acting is.
 
 ---
 

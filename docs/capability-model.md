@@ -101,9 +101,12 @@ The two answers live in different places on purpose:
 | Does this particular holder hold the right, now? | `capability` + `gate::admit` | run time |
 
 `gate::admit` demands both, so neither alone is enough. The compile-time half is
-a *proof value* (`authorization<Resource, Action>`), which means a protected
-operation cannot be called without it, and the run-time half is a value the
-caller must possess, which means possession cannot be simulated.
+a *proof value* (`authorization<Resource, Action, Principal>`), which means a
+protected operation cannot be called without it, and the run-time half is a
+value the caller must possess, which means possession cannot be simulated. The
+proof names the principal it was issued for and the gate takes that principal in
+the same position, so the two must agree: possession plus a policy decision for
+*somebody* is not enough.
 
 ## Revocation
 

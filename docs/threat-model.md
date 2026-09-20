@@ -38,12 +38,17 @@ forgeries of a genuine tag, and the demo's steps 2 and 3.
 The caller holds a valid capability and asks for something it does not grant,
 or holds one that has been revoked, or tries to make a stronger one.
 
-**Defended by.** The gate checks `required_right(Action)` and the epoch before
-doing anything; `attenuate` and `delegate` are constrained by `requires`, so
+**Defended by.** The gate checks that the capability is valid, that it holds
+`required_right(Action)`, and that its epoch is current, in that order, before
+doing anything. `attenuate` and `delegate` are constrained by `requires`, so
 amplification does not compile; `delegate` additionally requires `grant`, so a
-holder cannot manufacture authority for a third party.
+holder cannot manufacture authority for a third party; and `attenuate`
+*consumes* what it weakens, so the path that does not require `grant` cannot be
+used to duplicate authority either.
 
-**Evidence.** `tests/sandbox/test_sandbox.cpp` for the run-time half;
+**Evidence.** `tests/sandbox/test_sandbox.cpp` for the run-time half, including
+a spent capability being refused with its own audit outcome;
+`tests/capability/test_capability.cpp` for the consumption;
 `tests/compile_fail/capability_*.cpp` (5 cases) for the compile-time half.
 
 ### A3 — A caller that has no authority at all
@@ -58,8 +63,19 @@ is addressed structurally: `gate` holds no authority of its own, and
 `protected_object`'s accessors take the capability as a parameter, so a
 component can only do what it was handed authority for.
 
+An adversarial review of this layer found three ways to *use* the API to get
+authority the design says cannot be had, and all three are closed: a session
+state could be fabricated from a default-constructed core, a policy proof could
+be produced with one `std::bit_cast`, and a rule that named a principal could
+mean its whole kind. The gate now also takes the principal from the proof's type
+rather than from a free template argument, so a proof cannot be presented under
+somebody else's name.
+
 **Evidence.** `compile_fail/capability_construct.cpp`,
-`compile_fail/capability_copy.cpp`, and the deputy case in
+`compile_fail/capability_copy.cpp`, `compile_fail/session_forged_state.cpp`,
+`compile_fail/policy_bare_principal_rule.cpp`,
+`compile_fail/gate_proof_for_another_principal.cpp`, the `static_assert`s on
+`authorization` in `auth/policy.hpp`, and the deputy case in
 `tests/sandbox/test_sandbox.cpp`.
 
 ### A4 — A caller that races the checks
@@ -68,11 +84,22 @@ The caller tries to make the world change between a check and the use: revoke
 after a capability was admitted, mutate an object between validating it and
 acting on it.
 
-**Defended by.** The gate performs the rights and epoch checks immediately
-before returning, and the operation that follows is on the protected object
-whose value is private. The epoch is read with acquire semantics from an atomic
-slot, and `revoke_all` is one `fetch_add`, so a concurrent revocation either
-happens before the check or after it — never halfway.
+**Defended by.** The gate performs the validity, rights and epoch checks
+immediately before returning, and the operation that follows is on the protected
+object whose value is private. The epoch is read with acquire semantics from an
+atomic slot, and `revoke_all` is one `fetch_add`, so a concurrent revocation
+either happens before the check or after it — never halfway.
+
+**The window that remains, stated rather than implied.** "After it" means that a
+revocation landing between `admit` returning and the operation being performed
+is not observed by that operation: one use of a capability that was, by then,
+revoked. Closing it needs an epoch guard held across the operation — the gate
+would return a token that increments an in-flight counter and `revoke_all` would
+wait for it to drain — which would put a wait on the revocation path and a
+release-store on every admission. That trade is not made here, and the guarantee
+this library offers is therefore the one `README.md` states: a stale capability
+cannot *start* an operation, not that no operation can be in flight when the
+revocation lands. `docs/testing.md` lists this among the known gaps.
 
 **Evidence.** `tests/capability/test_revocation.cpp` asserts that concurrent
 revocations all take effect (a load-then-store would lose them); the whole
@@ -165,9 +192,15 @@ Worth stating, because each is a plausible-sounding objection:
   and are visible in the audit trail. They identify a capability; they do not
   authenticate one, and knowing one grants nothing, because a capability cannot
   be constructed from it.
-* **Revoking a capability the attacker does not hold.** `authority` declares
-  who may revoke — the policy's `revoke` rule on the resource — and the gate
-  records every revocation. A caller who can revoke was given the right to.
+* **Revoking a capability the attacker does not hold.** `revoke_all` is a free
+  function with no capability parameter and no policy proof, so *anyone who can
+  call it* revokes everything for that resource. The policy's `revoke` rule
+  describes who may revoke in the intended design, and the gate enforces that
+  for mediated operations — but `revoke_all` itself is the blunt instrument B5
+  describes, not an authorised operation. A caller who can run code in the
+  process can already do worse (B2). What the design guarantees is that a
+  revocation *takes effect*: it is one atomic increment, all capabilities for
+  the resource become stale, and the gate refuses them.
 
 ## Reviewing this model
 

@@ -86,8 +86,11 @@ meaningful only in one state exists only in that state, and a transition that
 is illegal is a `= delete("...")` declaration rather than a run-time check.
 `policy<Rules...>` is a compile-time value that asserts its own exhaustiveness,
 and `evaluate<Policy, Principal, Resource, Action>()` is a `consteval` decision.
-`authorization<Resource, Action>` is the proof: opaque, move-only, and
-obtainable only through `authorize`, which is where the decision is made.
+`authorization<Resource, Action, Principal>` is the proof: opaque, move-only,
+non-trivially-copyable (so `std::bit_cast` cannot fabricate one), and obtainable
+only through `authorize`, which is where the decision is made. It carries the
+principal it was issued for, and `gate::admit` takes that principal in the same
+position, so a proof cannot be presented under another identity.
 
 ### `sandbox/` — how
 
