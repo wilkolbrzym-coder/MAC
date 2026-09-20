@@ -1,0 +1,148 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "META_AUTH_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "gcc-16",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++-16"
+      }
+    },
+
+    {
+      "name": "dev",
+      "displayName": "Developer build (Debug, contracts + reflection, tests)",
+      "description": "The default working configuration. Everything enabled that the compiler supports.",
+      "inherits": "gcc-16",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "META_AUTH_BUILD_TESTS": "ON",
+        "META_AUTH_BUILD_BENCHMARKS": "OFF",
+        "META_AUTH_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release build (LTO, hardening, no tests)",
+      "description": "What an artifact would be built from. Same dialect guarantees as dev, different code generation.",
+      "inherits": "gcc-16",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON",
+        "META_AUTH_BUILD_TESTS": "OFF",
+        "META_AUTH_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "portable",
+      "displayName": "Portable build (no contracts, no reflection)",
+      "description": "Proves the library degrades gracefully: the same sources, the optional dialect features switched off, the full suite still green.",
+      "inherits": "gcc-16",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "META_AUTH_ENABLE_CONTRACTS": "OFF",
+        "META_AUTH_ENABLE_REFLECTION": "OFF",
+        "META_AUTH_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Address + undefined-behaviour sanitizers",
+      "inherits": "gcc-16",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "META_AUTH_SANITIZER": "address+undefined",
+        "META_AUTH_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "Thread sanitizer",
+      "description": "The audit trail is the only concurrently written component; this preset is what keeps that claim honest.",
+      "inherits": "gcc-16",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "META_AUTH_SANITIZER": "thread",
+        "META_AUTH_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage instrumented test build",
+      "inherits": "gcc-16",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "META_AUTH_ENABLE_COVERAGE": "ON",
+        "META_AUTH_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "bench",
+      "displayName": "Benchmark build",
+      "inherits": "gcc-16",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "META_AUTH_BUILD_TESTS": "OFF",
+        "META_AUTH_BUILD_BENCHMARKS": "ON",
+        "META_AUTH_ENABLE_HARDENING": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "portable", "configurePreset": "portable" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "bench", "configurePreset": "bench", "configuration": "Release" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true, "verbosity": "default" },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "dev", "configurePreset": "dev", "inherits": "base" },
+    { "name": "portable", "configurePreset": "portable", "inherits": "base" },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "inherits": "base",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:strict_string_checks=1:check_initialization_order=1:detect_stack_use_after_return=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "inherits": "base",
+      "environment": {
+        "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1"
+      }
+    },
+    {
+      "name": "unit-only",
+      "configurePreset": "dev",
+      "inherits": "base",
+      "filter": { "include": { "label": "unit" } }
+    }
+  ]
+}
