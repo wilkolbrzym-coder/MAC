@@ -28,7 +28,18 @@ function(meta_auth_add_test name)
         set(ARG_GROUP "unit")
     endif()
 
-    add_executable(${name} ${ARG_SOURCES})
+    # The runner is compiled into every test binary, so a test source file
+    # contains test cases and nothing else. The variables are set by
+    # tests/CMakeLists.txt and are required rather than defaulted: a silently
+    # missing runner would produce a link error that says nothing about why.
+    if(NOT DEFINED META_AUTH_TEST_FRAMEWORK_MAIN OR NOT DEFINED META_AUTH_TEST_FRAMEWORK_DIR)
+        message(FATAL_ERROR
+            "meta_auth_add_test() used before tests/CMakeLists.txt defined "
+            "META_AUTH_TEST_FRAMEWORK_MAIN / META_AUTH_TEST_FRAMEWORK_DIR.")
+    endif()
+
+    add_executable(${name} ${ARG_SOURCES} "${META_AUTH_TEST_FRAMEWORK_MAIN}")
+    target_include_directories(${name} PRIVATE "${META_AUTH_TEST_FRAMEWORK_DIR}")
     target_link_libraries(${name} PRIVATE
         meta_auth::meta_auth
         meta_auth_sanitizers
@@ -49,44 +60,46 @@ function(meta_auth_add_test name)
         TIMEOUT "${ARG_TIMEOUT}")
 endfunction()
 
-# meta_auth_add_crash_test(<name>
-#                          GROUP <group>
-#                          COMMAND <argv>...
-#                          EXPECT <SIGNAL|exit-code>
-#                          [WILL_FAIL])
+# meta_auth_add_failure_test(<name>
+#                            PROGRAM <executable>
+#                            RESULT_REGEX <regex>
+#                            [ARGS <arg>...]
+#                            [OUTPUT_REGEX <regex>]
+#                            [ENVIRONMENT <var=value>...]
+#                            [LABELS <label>...]
+#                            [TIMEOUT <seconds>])
 #
-# Registers a test whose *success* is the process dying the way the design
-# says it must. Fail-stop behaviour cannot be asserted from inside the process
-# that stops, so it is asserted from the harness.
-function(meta_auth_add_crash_test name)
-    cmake_parse_arguments(ARG "" "GROUP;EXPECT;TIMEOUT" "COMMAND;LABELS" ${ARGN})
+# Registers a test whose *success* is the process failing in a documented way.
+# Fail-stop behaviour cannot be asserted from inside the process that stops,
+# so it is asserted from the harness, and the driver checks the reason as well
+# as the status (see cmake/MetaAuthExpectFailure.cmake).
+function(meta_auth_add_failure_test name)
+    cmake_parse_arguments(ARG "" "PROGRAM;RESULT_REGEX;OUTPUT_REGEX;TIMEOUT"
+                              "ARGS;ENVIRONMENT;LABELS" ${ARGN})
 
-    if(NOT ARG_COMMAND)
-        message(FATAL_ERROR "meta_auth_add_crash_test(${name}) requires COMMAND.")
+    if(NOT ARG_PROGRAM)
+        message(FATAL_ERROR "meta_auth_add_failure_test(${name}) requires PROGRAM.")
     endif()
-    if(NOT ARG_EXPECT)
-        set(ARG_EXPECT "SIGABRT")
+    if(NOT ARG_RESULT_REGEX)
+        message(FATAL_ERROR
+            "meta_auth_add_failure_test(${name}) requires RESULT_REGEX. "
+            "'It must fail' is not a testable claim; state the expected status.")
     endif()
 
-    add_test(NAME ${name} COMMAND ${ARG_COMMAND})
+    add_test(NAME ${name}
+        COMMAND "${CMAKE_COMMAND}"
+            "-DMETA_AUTH_EXPECT_PROGRAM=${ARG_PROGRAM}"
+            "-DMETA_AUTH_EXPECT_RESULT_REGEX=${ARG_RESULT_REGEX}"
+            "-DMETA_AUTH_EXPECT_ARGS=${ARG_ARGS}"
+            "-DMETA_AUTH_EXPECT_OUTPUT_REGEX=${ARG_OUTPUT_REGEX}"
+            -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/MetaAuthExpectFailure.cmake")
+
     set_tests_properties(${name} PROPERTIES
-        LABELS "${ARG_GROUP};${ARG_LABELS}"
+        LABELS "fail_stop;${ARG_LABELS}"
         TIMEOUT "${ARG_TIMEOUT}")
 
-    if(ARG_EXPECT STREQUAL "PASS")
-        return()
-    endif()
-
-    if(ARG_EXPECT MATCHES "^SIG")
-        # CTest understands the signal names it was built with; a fatal signal
-        # is reported as a failed test, so the harness inverts it.
-        set_tests_properties(${name} PROPERTIES WILL_FAIL TRUE)
-        # A crash is only evidence when it is the *documented* crash. The
-        # wrapper script inspects the exit status and rejects a mismatch.
-        set_property(TEST ${name} PROPERTY
-            PASS_REGULAR_EXPRESSION "meta-auth: contract violation")
-    else()
-        set_tests_properties(${name} PROPERTIES WILL_FAIL TRUE)
+    if(ARG_ENVIRONMENT)
+        set_tests_properties(${name} PROPERTIES ENVIRONMENT "${ARG_ENVIRONMENT}")
     endif()
 endfunction()
 
@@ -119,7 +132,7 @@ function(meta_auth_add_compile_fail_test source)
             "-DMETA_AUTH_NEGATIVE_INCLUDE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../include"
             "-DMETA_AUTH_NEGATIVE_CONTRACTS=${META_AUTH_COMPILER_HAS_CONTRACTS}"
             "-DMETA_AUTH_NEGATIVE_REFLECTION=${META_AUTH_COMPILER_HAS_REFLECTION}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/MetaAuthCompileFail.cmake")
+            -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/MetaAuthCompileFail.cmake")
 
     set_tests_properties(compile_fail.${_name} PROPERTIES
         LABELS "compile_fail"

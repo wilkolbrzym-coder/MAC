@@ -15,6 +15,7 @@
 // ===========================================================================
 #include "meta_auth/config.hpp"
 #include "meta_auth/version.hpp"
+#include "test_framework.hpp"
 
 #include <cstdio>
 #include <string_view>
@@ -146,15 +147,27 @@ static_assert(first_size<char, int, double>() == sizeof(char));
 
 // ---------------------------------------------------------------------------
 // Runtime report
+//
+// The assertions above are compile-time, so they hold whatever this binary is
+// asked to do. This case adds the part a static_assert cannot express: it
+// prints the dialect the binary was actually built with, so that a surprising
+// result elsewhere in the suite can be traced back to how it was compiled.
 // ---------------------------------------------------------------------------
-auto main() -> int {
-    std::printf("%s %.*s\n", meta_auth::project_name.data(),
+META_AUTH_TEST("dialect", "configuration_report") {
+    std::printf("\n    %s %.*s\n", meta_auth::project_name.data(),
                 static_cast<int>(meta_auth::version.size()), meta_auth::version.data());
-    std::printf("  dialect    : %s\n", meta_auth::config::dialect_summary());
-    std::printf("  contracts  : %s\n", META_AUTH_HAS_CONTRACTS ? "enforced" : "disabled");
-    std::printf("  reflection : %s\n", META_AUTH_HAS_REFLECTION ? "available" : "disabled");
-    std::printf("  pack index : %s\n", META_AUTH_HAS_PACK_INDEXING ? "available" : "disabled");
-    std::printf("  delete(msg): %s\n",
+    std::printf("      dialect    : %s\n", meta_auth::config::dialect_summary());
+    std::printf("      contracts  : %s\n", META_AUTH_HAS_CONTRACTS ? "enforced" : "disabled");
+    std::printf("      reflection : %s\n", META_AUTH_HAS_REFLECTION ? "available" : "disabled");
+    std::printf("      pack index : %s\n", META_AUTH_HAS_PACK_INDEXING ? "available" : "disabled");
+    std::printf("      delete(msg): %s\n",
                 META_AUTH_HAS_DELETED_WITH_MESSAGE ? "available" : "disabled");
-    return 0;
+    std::fflush(stdout);
+
+    // The library is built on these three unconditionally; the assertion is
+    // here as well as in config.hpp so that the requirement is visible in the
+    // test suite and not only in a header.
+    META_AUTH_CHECK(META_AUTH_HAS_EXPECTED == 1);
+    META_AUTH_CHECK(META_AUTH_HAS_PACK_INDEXING == 1);
+    META_AUTH_CHECK(META_AUTH_HAS_DELETED_WITH_MESSAGE == 1);
 }
