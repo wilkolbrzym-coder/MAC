@@ -21,7 +21,7 @@ option(META_AUTH_BUILD_BENCHMARKS
 
 option(META_AUTH_BUILD_EXAMPLES
     "Build the runnable examples"
-    OFF)
+    ${META_AUTH_IS_TOP_LEVEL})
 
 option(META_AUTH_ENABLE_CONTRACTS
     "Use C++26 contract assertions (P2900) when the compiler implements them"

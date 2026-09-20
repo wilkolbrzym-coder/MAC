@@ -33,7 +33,7 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "META_AUTH_BUILD_TESTS": "ON",
         "META_AUTH_BUILD_BENCHMARKS": "OFF",
-        "META_AUTH_BUILD_EXAMPLES": "OFF"
+        "META_AUTH_BUILD_EXAMPLES": "ON"
       }
     },
     {
@@ -57,7 +57,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "META_AUTH_ENABLE_CONTRACTS": "OFF",
         "META_AUTH_ENABLE_REFLECTION": "OFF",
-        "META_AUTH_BUILD_TESTS": "ON"
+        "META_AUTH_BUILD_TESTS": "ON",
+        "META_AUTH_BUILD_EXAMPLES": "ON"
       }
     },
     {

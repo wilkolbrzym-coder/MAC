@@ -125,7 +125,8 @@ public:
 
         constexpr right required = required_right(Action);
 
-        const audit_event base = make_event<Principal>(presented, principal_label);
+        const audit_event base =
+            make_event<Action, Principal>(presented, principal_label);
 
         if (!presented.has(required)) {
             record(base, audit_outcome::denied_insufficient_rights);
@@ -150,11 +151,11 @@ public:
     [[nodiscard]] auto trail() const noexcept -> const audit_trail& { return *trail_; }
 
 private:
-    template <principal_type Principal, rights_set Rights>
-    [[nodiscard]] constexpr auto make_event(
-        const capability<resource_type, Rights>& presented,
-        std::string_view principal_label) const noexcept -> audit_event {
+    template <action Action, principal_type Principal, rights_set Rights>
+    [[nodiscard]] auto make_event(const capability<resource_type, Rights>& presented,
+                                  std::string_view principal_label) const noexcept -> audit_event {
         audit_event event{};
+        event.action_raw = static_cast<std::uint8_t>(Action);
         event.timestamp_ns = audit_trail::now_ns();
         event.principal_hash =
             principal_label.empty() ? Principal::numeric_id()
