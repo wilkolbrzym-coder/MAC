@@ -39,3 +39,5 @@ add_subdirectory(identity)
 add_subdirectory(auth)
 
 add_subdirectory(sandbox)
+
+add_subdirectory(compile_fail)

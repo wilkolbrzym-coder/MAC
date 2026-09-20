@@ -1,0 +1,4 @@
+# Required: the diagnostic must name the rule that was broken, not merely fail.
+use of deleted function
+authority::mint: the requested rights exceed this authority's maximum
+An authority cannot create a capability stronger than itself

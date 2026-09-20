@@ -1,0 +1,3 @@
+use of deleted function
+capability
+!cannot be copied

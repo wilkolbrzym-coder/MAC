@@ -1,0 +1,4 @@
+# A capability cannot be created out of nothing: the only constructor is
+# private, so this is a call to a constructor that does not exist.
+no matching function for call to
+capability

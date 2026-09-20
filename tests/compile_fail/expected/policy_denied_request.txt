@@ -1,0 +1,3 @@
+use of deleted function
+policy: denied by default
+No rule in this policy grants this principal this action on this resource

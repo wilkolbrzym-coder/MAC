@@ -1,0 +1,3 @@
+static assertion failed
+does not cover every resource kind
+Deny-by-default means an uncovered resource is unusable
