@@ -37,3 +37,5 @@ add_subdirectory(capability)
 add_subdirectory(identity)
 
 add_subdirectory(auth)
+
+add_subdirectory(sandbox)
