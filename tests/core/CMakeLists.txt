@@ -82,3 +82,8 @@ meta_auth_add_failure_test(contract.probe_rejects_an_unknown_mode
     OUTPUT_REGEX "unknown mode"
     LABELS "core"
     TIMEOUT 30)
+
+meta_auth_add_test(meta_auth_core_identity_types
+    GROUP unit
+    SOURCES test_identity_types.cpp
+    TIMEOUT 60)
