@@ -21,7 +21,12 @@ include(CMakePushCheckState)
 set(META_AUTH_CONTRACTS_STATUS "disabled by option")
 set(META_AUTH_REFLECTION_STATUS "disabled by option")
 
-if(META_AUTH_ENABLE_CONTRACTS)
+# The probe flags are GCC spellings. MSVC would ignore an unknown `-f...`
+# option with a warning and then fail the probe for the unrelated reason that
+# its parser does not accept `pre(...)`, which would leave the configure log
+# claiming a feature was tested when it was not. The flags are therefore only
+# offered to the compilers that speak them.
+if(META_AUTH_ENABLE_CONTRACTS AND NOT MSVC)
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_FLAGS "-fcontracts")
     check_cxx_source_compiles([[
@@ -38,7 +43,7 @@ if(META_AUTH_ENABLE_CONTRACTS)
     endif()
 endif()
 
-if(META_AUTH_ENABLE_REFLECTION)
+if(META_AUTH_ENABLE_REFLECTION AND NOT MSVC)
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_FLAGS "-freflection")
     check_cxx_source_compiles([[
@@ -77,15 +82,23 @@ function(meta_auth_configure_dialect target)
         # option is present on the link line. Omitting it here produced a
         # perfectly compiled object file and an undefined reference to
         # `handle_contract_violation`.
-        target_compile_options(${target} INTERFACE -fcontracts)
-        target_link_options(${target} INTERFACE -fcontracts)
+        # Compiler-conditional, because these options are exported to
+        # consumers: a project that finds this package with a different
+        # compiler must not be handed a flag its compiler has never heard of.
+        # The definition is unconditional -- a consumer compiled without
+        # contracts loses the guarantees the headers reasoned about.
+        target_compile_options(${target} INTERFACE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fcontracts>)
+        target_link_options(${target} INTERFACE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fcontracts>)
         target_compile_definitions(${target} INTERFACE META_AUTH_CONFIG_USE_CONTRACTS=1)
     else()
         target_compile_definitions(${target} INTERFACE META_AUTH_CONFIG_USE_CONTRACTS=0)
     endif()
 
     if(META_AUTH_COMPILER_HAS_REFLECTION)
-        target_compile_options(${target} INTERFACE -freflection)
+        target_compile_options(${target} INTERFACE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-freflection>)
         target_compile_definitions(${target} INTERFACE META_AUTH_CONFIG_USE_REFLECTION=1)
     else()
         target_compile_definitions(${target} INTERFACE META_AUTH_CONFIG_USE_REFLECTION=0)

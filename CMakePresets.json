@@ -17,7 +17,23 @@
       "generator": "Ninja"
     },
     {
-      "name": "gcc-16",
+      "name": "base-msvc",
+      "hidden": true,
+      "description": "The Visual Studio generator, which needs no developer command prompt and is multi-config, so a build type is chosen at build time rather than at configure time.",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "META_AUTH_WARNINGS_AS_ERRORS": "ON"
+      },
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      }
+    },
+
+    {
+      "name": "toolchain-gcc16",
       "hidden": true,
       "inherits": "base",
       "cacheVariables": {
@@ -25,10 +41,18 @@
       }
     },
     {
-      "name": "dev",
-      "displayName": "Developer build (Debug, contracts + reflection, tests)",
-      "description": "The default working configuration. Everything enabled that the compiler supports.",
-      "inherits": "gcc-16",
+      "name": "toolchain-clang",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+
+    {
+      "name": "opt-dev",
+      "hidden": true,
+      "description": "Debug, tests, examples, every optional dialect feature the compiler has.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "META_AUTH_BUILD_TESTS": "ON",
@@ -37,22 +61,9 @@
       }
     },
     {
-      "name": "release",
-      "displayName": "Release build (LTO, hardening, no tests)",
-      "description": "What an artifact would be built from. Same dialect guarantees as dev, different code generation.",
-      "inherits": "gcc-16",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON",
-        "META_AUTH_BUILD_TESTS": "OFF",
-        "META_AUTH_BUILD_EXAMPLES": "ON"
-      }
-    },
-    {
-      "name": "portable",
-      "displayName": "Portable build (no contracts, no reflection)",
-      "description": "Proves the library degrades gracefully: the same sources, the optional dialect features switched off, the full suite still green.",
-      "inherits": "gcc-16",
+      "name": "opt-portable",
+      "hidden": true,
+      "description": "The same sources with contracts and reflection switched off.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "META_AUTH_ENABLE_CONTRACTS": "OFF",
@@ -62,9 +73,19 @@
       }
     },
     {
-      "name": "asan",
-      "displayName": "Address + undefined-behaviour sanitizers",
-      "inherits": "gcc-16",
+      "name": "opt-release",
+      "hidden": true,
+      "description": "What an artifact would be built from: LTO, hardening, no tests.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON",
+        "META_AUTH_BUILD_TESTS": "OFF",
+        "META_AUTH_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "opt-asan",
+      "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "META_AUTH_SANITIZER": "address+undefined",
@@ -72,10 +93,8 @@
       }
     },
     {
-      "name": "tsan",
-      "displayName": "Thread sanitizer",
-      "description": "The audit trail is the only concurrently written component; this preset is what keeps that claim honest.",
-      "inherits": "gcc-16",
+      "name": "opt-tsan",
+      "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "META_AUTH_SANITIZER": "thread",
@@ -83,9 +102,8 @@
       }
     },
     {
-      "name": "coverage",
-      "displayName": "Coverage instrumented test build",
-      "inherits": "gcc-16",
+      "name": "opt-coverage",
+      "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "META_AUTH_ENABLE_COVERAGE": "ON",
@@ -93,51 +111,108 @@
       }
     },
     {
-      "name": "bench",
-      "displayName": "Benchmark build",
-      "inherits": "gcc-16",
+      "name": "opt-bench",
+      "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "META_AUTH_BUILD_TESTS": "OFF",
         "META_AUTH_BUILD_BENCHMARKS": "ON",
         "META_AUTH_ENABLE_HARDENING": "OFF"
       }
-    }
-  ],
-  "buildPresets": [
+    },
+
     {
       "name": "dev",
-      "configurePreset": "dev"
+      "displayName": "Developer build (Debug, contracts + reflection, tests)",
+      "description": "The default working configuration, with the host toolchain. Everything enabled that the compiler supports. This is the preset to run first on any platform: it requires only a C++26 compiler and Ninja.",
+      "inherits": ["base", "opt-dev"]
     },
     {
-      "name": "release",
-      "configurePreset": "release"
+      "name": "dev-gcc16",
+      "displayName": "Developer build, pinned to GCC 16",
+      "description": "The reference configuration the guarantees are argued from: contracts and static reflection are GCC 16 features today, so this is the build in which every layer is fully enabled. CI runs this one.",
+      "inherits": ["toolchain-gcc16", "opt-dev"]
+    },
+    {
+      "name": "dev-clang",
+      "displayName": "Developer build, pinned to Clang",
+      "inherits": ["toolchain-clang", "opt-dev"]
     },
     {
       "name": "portable",
-      "configurePreset": "portable"
+      "displayName": "Portable build (no contracts, no reflection)",
+      "description": "Proves the library degrades gracefully: the same sources, the optional dialect features switched off, the full suite still green.",
+      "inherits": ["base", "opt-portable"]
+    },
+    {
+      "name": "portable-gcc16",
+      "displayName": "Portable build, pinned to GCC 16",
+      "inherits": ["toolchain-gcc16", "opt-portable"]
+    },
+    {
+      "name": "release",
+      "displayName": "Release build (LTO, hardening, no tests)",
+      "inherits": ["base", "opt-release"]
     },
     {
       "name": "asan",
-      "configurePreset": "asan"
+      "displayName": "Address + undefined-behaviour sanitizers",
+      "inherits": ["base", "opt-asan"]
     },
     {
       "name": "tsan",
-      "configurePreset": "tsan"
+      "displayName": "Thread sanitizer",
+      "description": "The audit trail is the only concurrently written component; this preset is what keeps that claim honest.",
+      "inherits": ["base", "opt-tsan"]
     },
     {
       "name": "coverage",
-      "configurePreset": "coverage"
+      "displayName": "Coverage instrumented test build",
+      "inherits": ["base", "opt-coverage"]
     },
+    {
+      "name": "bench",
+      "displayName": "Benchmark build",
+      "inherits": ["base", "opt-bench"]
+    },
+
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows, Visual Studio 2022 (x64)",
+      "description": "For a Windows machine without Ninja or a developer command prompt. Multi-config: pick Debug or Release with --config on the build and test commands. Contracts and static reflection are GCC features today, so this configuration runs with the portable fallbacks -- which is the point of it.",
+      "inherits": "base-msvc",
+      "cacheVariables": {
+        "META_AUTH_BUILD_TESTS": "ON",
+        "META_AUTH_BUILD_EXAMPLES": "ON"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "dev-gcc16", "configurePreset": "dev-gcc16" },
+    { "name": "dev-clang", "configurePreset": "dev-clang" },
+    { "name": "portable", "configurePreset": "portable" },
+    { "name": "portable-gcc16", "configurePreset": "portable-gcc16" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "coverage", "configurePreset": "coverage" },
     {
       "name": "bench",
       "configurePreset": "bench",
       "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc",
+      "configurePreset": "windows-msvc",
+      "configuration": "Debug"
     }
   ],
+
   "testPresets": [
     {
-      "name": "base",
+      "name": "test-base",
       "hidden": true,
       "output": {
         "outputOnFailure": true,
@@ -151,17 +226,32 @@
     {
       "name": "dev",
       "configurePreset": "dev",
-      "inherits": "base"
+      "inherits": "test-base"
+    },
+    {
+      "name": "dev-gcc16",
+      "configurePreset": "dev-gcc16",
+      "inherits": "test-base"
+    },
+    {
+      "name": "dev-clang",
+      "configurePreset": "dev-clang",
+      "inherits": "test-base"
     },
     {
       "name": "portable",
       "configurePreset": "portable",
-      "inherits": "base"
+      "inherits": "test-base"
+    },
+    {
+      "name": "portable-gcc16",
+      "configurePreset": "portable-gcc16",
+      "inherits": "test-base"
     },
     {
       "name": "asan",
       "configurePreset": "asan",
-      "inherits": "base",
+      "inherits": "test-base",
       "environment": {
         "ASAN_OPTIONS": "detect_leaks=1:strict_string_checks=1:check_initialization_order=1:detect_stack_use_after_return=1",
         "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
@@ -170,15 +260,21 @@
     {
       "name": "tsan",
       "configurePreset": "tsan",
-      "inherits": "base",
+      "inherits": "test-base",
       "environment": {
         "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1"
       }
     },
     {
+      "name": "windows-msvc",
+      "configurePreset": "windows-msvc",
+      "inherits": "test-base",
+      "configuration": "Debug"
+    },
+    {
       "name": "unit-only",
       "configurePreset": "dev",
-      "inherits": "base",
+      "inherits": "test-base",
       "filter": {
         "include": {
           "label": "unit"

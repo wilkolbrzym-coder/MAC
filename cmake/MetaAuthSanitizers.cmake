@@ -11,7 +11,12 @@
 # They are deliberately NOT INTERFACE properties of `meta_auth` itself: a
 # consumer must not inherit instrumentation from a header-only dependency.
 # ---------------------------------------------------------------------------
-add_library(meta_auth_sanitizers INTERFACE)
+# A consumer that adds this project with `add_subdirectory` may already have a
+# target by this name; creating a second one is a configure error in CMake, so
+# the guard turns a collision into a reused target.
+if(NOT TARGET meta_auth_sanitizers)
+    add_library(meta_auth_sanitizers INTERFACE)
+endif()
 
 # Every sanitizer combination this project supports, mapped to its flags.
 # ASan and TSan are mutually exclusive by construction; asking for both is a
@@ -63,13 +68,47 @@ else()
         "Expected one of: none, address, thread, undefined, address+undefined, leak.")
 endif()
 
+# ---------------------------------------------------------------------------
+# Availability
+#
+# Compilers do not implement the same set, and the failure has to be visible.
+# A configure that quietly drops the instrumentation produces a green CI job
+# that proves nothing about memory safety -- which is the specific claim these
+# presets exist to support -- so an unsupported request warns loudly rather
+# than being silently ignored.
+#
+# Rewriting the flag list per compiler is also what keeps the presets usable:
+# `-fsanitize=thread` handed to cl.exe is an unknown option, and cl.exe's
+# response to an unknown option is a warning followed by a build that does not
+# do what it says.
+# ---------------------------------------------------------------------------
+if(MSVC)
+    if(META_AUTH_SANITIZER STREQUAL "address")
+        set(_meta_auth_sanitizer_flags /fsanitize=address)
+    elseif(NOT META_AUTH_SANITIZER STREQUAL "none")
+        message(WARNING
+            "META_AUTH_SANITIZER='${META_AUTH_SANITIZER}' is not implemented by MSVC, which "
+            "ships AddressSanitizer only. Building uninstrumented. Use the 'address' preset if "
+            "you want memory-safety instrumentation, and do not read a run on this platform as "
+            "evidence about the thread-safety or undefined-behaviour claims.")
+        set(_meta_auth_sanitizer_flags "")
+    endif()
+elseif(APPLE AND META_AUTH_SANITIZER STREQUAL "leak")
+    message(WARNING
+        "The leak sanitizer is not available on macOS: Apple's clang does not ship "
+        "LeakSanitizer. Building uninstrumented. AddressSanitizer's leak checker does work "
+        "there, so the 'address' preset is the one to use.")
+    set(_meta_auth_sanitizer_flags "")
+endif()
+
 if(_meta_auth_sanitizer_flags)
     target_compile_options(meta_auth_sanitizers INTERFACE ${_meta_auth_sanitizer_flags})
     target_link_options(meta_auth_sanitizers INTERFACE ${_meta_auth_sanitizer_flags})
 
     # UBSan's default runtime prints a diagnostic and continues, which turns a
-    # detected defect into a passing test. The suite must fail instead.
-    if(META_AUTH_SANITIZER MATCHES "undefined")
+    # detected defect into a passing test. The suite must fail instead. MSVC
+    # has no UBSan, and the flag is not an option there.
+    if(META_AUTH_SANITIZER MATCHES "undefined" AND NOT MSVC)
         target_compile_options(meta_auth_sanitizers INTERFACE -fno-sanitize-recover=all)
     endif()
 

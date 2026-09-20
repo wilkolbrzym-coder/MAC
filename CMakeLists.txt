@@ -71,6 +71,14 @@ meta_auth_configure_hardening(meta_auth)
 #  Optional components
 # ---------------------------------------------------------------------------
 if(META_AUTH_BUILD_TESTS)
+    # The concurrency tests construct std::thread, and `Threads::Threads` is
+    # what supplies the platform's threading library where it is separate from
+    # the C runtime. On this machine glibc has absorbed libpthread, so the
+    # omission was invisible; on macOS and Windows the target is a no-op, and
+    # on older Linux distributions it is the difference between a link error
+    # and a build. Required rather than optional: a build that cannot link is
+    # not a supported build.
+    find_package(Threads REQUIRED)
     enable_testing()
     add_subdirectory(tests)
 endif()

@@ -4,23 +4,37 @@
 #  The matrix is the set of configurations the library claims to work in, and
 #  every entry exists because of a sentence in the documentation:
 #
-#    dev        contracts and reflection on -- the reference configuration
-#    portable   both switched off -- the claim that the guarantees survive a
-#               compiler without them, which is only true if a build proves it
-#    asan       address and undefined-behaviour sanitizers -- the memory-safety
-#               claims, including the ones the bounds analysis gets wrong
-#    tsan       thread sanitizer -- the audit trail's claim about concurrent
-#               readers and writers
-#    bench      the optimized build, and the constant-time measurement that
-#               gates on its own spread
+#    linux/reference   contracts and reflection on, GCC 16 -- the reference
+#                      configuration, in the distribution that carries the
+#                      compiler those features are implemented in
+#    linux/portable    both switched off -- the claim that the guarantees
+#                      survive a compiler without them, which is only true if a
+#                      build proves it
+#    linux/asan        address and undefined-behaviour sanitizers -- the
+#                      memory-safety claims
+#    linux/tsan        thread sanitizer -- the audit trail's claim about
+#                      concurrent readers and writers
+#    linux/gcc-15      the oldest compiler the README claims works
+#    linux/clang       the other front end, and the one macOS uses
+#    macos/portable    AppleClang, no contracts, no reflection
+#    windows/msvc      MSVC through the Visual Studio generator
+#    bench             the optimized build, and the constant-time measurement
+#                      that gates on its own spread
 #
-#  A claim without a job is a claim nobody checks, which is why the matrix is
-#  short and every entry is load-bearing rather than exhaustive for its own
-#  sake.
+#  A claim without a job is a claim nobody checks, which is why every entry is
+#  load-bearing rather than exhaustive for its own sake.
 #
-#  The container is pinned to the distribution the project is developed on: the
-#  library needs GCC 16 for contracts and static reflection, and Ubuntu 26.04
-#  carries it. The version is part of the configuration, not a detail.
+#  What differs from the first version of this file: it ran GCC 16 on Linux and
+#  nothing else, so "works with the optional features switched off" and "works
+#  on this platform" were claims about a single container image. They are now
+#  jobs. The platform jobs run the *portable* configuration, because contracts
+#  and static reflection are GCC 16 features today: a job that demanded them on
+#  Windows would be testing a compiler that does not exist rather than the
+#  library.
+#
+#  The reference container is pinned to the distribution the project is
+#  developed on: the library needs GCC 16 for contracts and static reflection,
+#  and Ubuntu 26.04 carries it. The version is part of the configuration.
 # ===========================================================================
 name: ci
 
@@ -38,14 +52,17 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
-    name: ${{ matrix.preset }}
+  # -------------------------------------------------------------------------
+  # The reference configuration, and the two sanitized ones.
+  # -------------------------------------------------------------------------
+  linux-reference:
+    name: linux/${{ matrix.preset }}
     runs-on: ubuntu-latest
     container: ubuntu:26.04
     strategy:
       fail-fast: false
       matrix:
-        preset: [dev, portable, asan, tsan]
+        preset: [dev-gcc16, portable-gcc16, asan, tsan]
     steps:
       - name: Install the toolchain
         run: |
@@ -83,13 +100,131 @@ jobs:
 
       # The compile-failure suite is the negative half of the documentation's
       # claims, so it is asserted to have actually run rather than merely to
-      # have passed with zero tests.
+      # have passed with zero tests. The expected count comes from the sources
+      # rather than from a literal: the check used to grep for "Total Tests: 15"
+      # and adding a sixteenth negative test turned CI red with the message
+      # "the compile-failure suite did not register 15 tests".
       - name: Assert the negative suite ran
         run: |
+          expected=$(ls tests/compile_fail/*.cpp | grep -vc '_prefix.cpp$' || true)
           ctest --preset ${{ matrix.preset }} -L compile_fail -N | tee /tmp/negative.txt
-          grep -q "Total Tests: 15" /tmp/negative.txt \
-            || { echo "the compile-failure suite did not register 15 tests"; exit 1; }
+          actual=$(sed -n 's/^Total Tests: \([0-9]\+\)$/\1/p' /tmp/negative.txt)
+          echo "negative tests: registered ${actual}, sources ${expected}"
+          [ "${actual}" = "${expected}" ] || {
+            echo "the compile-failure suite did not register one test per source"
+            exit 1
+          }
 
+  # -------------------------------------------------------------------------
+  # Other compilers on the same platform. These are what make "degrades
+  # gracefully" a fact rather than a design intention.
+  # -------------------------------------------------------------------------
+  linux-toolchains:
+    name: linux/${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc-15
+            compiler: g++-15
+            packages: g++-15
+          - name: clang
+            compiler: clang++
+            packages: clang
+    steps:
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ${{ matrix.packages }} cmake ninja-build
+
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: ${{ matrix.compiler }} --version | head -1
+
+      # The preset is not pinned to a compiler on purpose: this is the job that
+      # proves the host toolchain is enough.
+      - name: Configure
+        run: cmake --preset portable -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+
+      - name: Build
+        run: cmake --build --preset portable
+
+      - name: Test
+        run: ctest --preset portable --output-on-failure
+
+  # -------------------------------------------------------------------------
+  # macOS: LLVM from Homebrew rather than AppleClang, and the reason is
+  # recorded because it is the difference between a meaningful job and a
+  # formality.
+  #
+  # The library requires P2573 (`= delete("reason")`) unconditionally -- its
+  # diagnostics are its user interface -- and Apple's clang, which is what
+  # `c++` resolves to on the runner image, lags the upstream release that
+  # implements it. Testing AppleClang here would test the compiler's release
+  # schedule rather than this library, and would report a red job that says
+  # nothing about the code. Homebrew's `llvm` formula tracks upstream, so that
+  # is the front end the job uses; `config.hpp` refuses any compiler without
+  # the feature, in one sentence, so the version floor is not silent.
+  # -------------------------------------------------------------------------
+  macos:
+    name: macos/portable
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `ninja` is not part of the runner image, and the presets pin it.
+      - name: Install the toolchain
+        run: brew install ninja llvm
+
+      - name: Toolchain
+        run: |
+          cmake --version | head -1
+          ninja --version
+          "$(brew --prefix llvm)/bin/clang++" --version | head -1
+
+      - name: Configure
+        run: |
+          cmake --preset portable \
+            -DCMAKE_CXX_COMPILER="$(brew --prefix llvm)/bin/clang++"
+
+      - name: Build
+        run: cmake --build --preset portable
+
+      - name: Test
+        run: ctest --preset portable --output-on-failure
+
+  # -------------------------------------------------------------------------
+  # Windows: MSVC through the Visual Studio generator, which needs neither
+  # Ninja nor a developer command prompt. Multi-config, so the configuration
+  # is chosen on the build and test lines.
+  # -------------------------------------------------------------------------
+  windows:
+    name: windows/msvc
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          cmake --version | Select-Object -First 1
+
+      - name: Configure
+        run: cmake --preset windows-msvc
+
+      - name: Build
+        run: cmake --build --preset windows-msvc
+
+      # `noTestsAction: error` in the preset is what keeps a run that selected
+      # nothing from being reported as a pass.
+      - name: Test
+        run: ctest --preset windows-msvc --output-on-failure
+
+  # -------------------------------------------------------------------------
+  # The optimized build, and its self-gating measurement.
+  # -------------------------------------------------------------------------
   benchmarks:
     name: bench
     runs-on: ubuntu-latest
@@ -122,11 +257,22 @@ jobs:
           META_AUTH_BENCH_MAX_SPREAD: "0.50"
         run: ./build/bench/bin/meta_auth_bench
 
+  # -------------------------------------------------------------------------
+  # Documentation, which is a deliverable here rather than a by-product.
+  # -------------------------------------------------------------------------
   documentation:
     name: documentation
     runs-on: ubuntu-latest
     container: ubuntu:26.04
     steps:
+      # The first version of this job installed nothing, and that was wrong for
+      # the same reason the build jobs install `make`: `actions/checkout`
+      # needs a `git` binary, and the minimal image does not carry one.
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates grep
+
       - uses: actions/checkout@v4
 
       # The README links to documents, and the documents link to each other.
@@ -155,3 +301,22 @@ jobs:
           cmake_version=$(grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -1 | cut -d' ' -f2)
           echo "header: $header_version, cmake: $cmake_version"
           [ "$header_version" = "$cmake_version" ]
+
+      # Every expectation file is paired with a source and vice versa. A
+      # negative test without an expectation is rejected at configure time; an
+      # expectation without a source is invisible, and that is the direction
+      # that rots.
+      - name: Every expectation file has a source
+        run: |
+          set -eu
+          for expectation in tests/compile_fail/expected/*.txt; do
+            case "$expectation" in
+              *.gcc.txt|*.clang.txt|*.msvc.txt) continue ;;
+            esac
+            stem=$(basename "$expectation" .txt)
+            if [ ! -e "tests/compile_fail/${stem}.cpp" ]; then
+              echo "expectation without a source: $expectation"
+              exit 1
+            fi
+          done
+          echo "every expectation file is paired"
