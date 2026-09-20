@@ -29,3 +29,5 @@ add_subdirectory(framework)
 add_subdirectory(dialect)
 
 add_subdirectory(core)
+
+add_subdirectory(crypto)
