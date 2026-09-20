@@ -27,3 +27,5 @@ add_subdirectory(framework)
 # compiler configuration is not what the suite assumes, every later result is
 # uninterpretable.
 add_subdirectory(dialect)
+
+add_subdirectory(core)

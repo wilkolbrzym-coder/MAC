@@ -35,11 +35,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <expected>
 #include <format>
 #include <source_location>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -122,6 +124,33 @@ template <typename T>
 
 [[nodiscard]] inline auto stringify(bool value) -> std::string {
     return value ? "true" : "false";
+}
+
+// ---------------------------------------------------------------------------
+// std::expected is rendered by the harness rather than by std::format.
+//
+// GCC 16's standard library does not provide a `std::formatter` for
+// `std::expected`: the specialization is absent, so `std::format("{}", value)`
+// is a compile error and `has_formatter` correctly reports false. That leaves
+// the most interesting values in this library -- the ones a test just failed
+// to unwrap -- unprintable, which is the opposite of what a failure report is
+// for. The overloads below therefore render both halves explicitly.
+// ---------------------------------------------------------------------------
+template <typename T, typename E>
+[[nodiscard]] auto stringify(const std::expected<T, E>& value) -> std::string {
+    if (!value.has_value()) {
+        return std::format("error({})", stringify(value.error()));
+    }
+    if constexpr (std::is_void_v<T>) {
+        return std::string{"success()"};
+    } else {
+        return std::format("success({})", stringify(*value));
+    }
+}
+
+template <typename E>
+[[nodiscard]] auto stringify(const std::unexpected<E>& value) -> std::string {
+    return std::format("unexpected({})", stringify(value.error()));
 }
 
 // ---------------------------------------------------------------------------

@@ -50,7 +50,6 @@ set(META_AUTH_WARNINGS_CORRECTNESS
     -Wundef
     -Wredundant-decls
     -Wmissing-declarations
-    -Wswitch-default
     -Wswitch-enum
     -Wpointer-arith
     -Wvla
@@ -91,6 +90,12 @@ set(META_AUTH_WARNINGS_CPP
     -Wuninitialized
     -Wmaybe-uninitialized
 )
+
+# `-Wswitch-default` is deliberately absent next to `-Wswitch-enum`. The two
+# together demand a `default:` label *and* a case for every enumerator, and a
+# `default:` label is precisely what silences the diagnostic that fires when a
+# new enumerator is added. This library wants that diagnostic: an unhandled
+# enumerator in `to_string` or in the policy engine is a defect, not a default.
 
 # Warnings that are valuable but that a header-only, template-heavy library
 # legitimately trips in unevaluated or discarded contexts. They are requested
