@@ -10,6 +10,8 @@
 //      1  at least one case failed
 //      2  the selection was empty (a filter that matches nothing is a typo,
 //         not a green run)
+//      3  an argument was not recognised (also a typo, and one that used to
+//         exit 0 with the usage text -- see `options::bad_argument`)
 // ===========================================================================
 #include "test_framework.hpp"
 
@@ -32,7 +34,7 @@ options:
   --help, -h             print this message
 
 exit codes: 0 all selected cases passed, 1 a case failed,
-            2 the selection was empty
+            2 the selection was empty, 3 an argument was not recognised
 )";
 
 /// A case name that appears twice in the registry means one of the two
@@ -66,7 +68,7 @@ auto parse_options(int argc, const char* const* argv) -> options {
         } else {
             std::fprintf(stderr, "unrecognised argument: %.*s\n\n", static_cast<int>(argument.size()),
                          argument.data());
-            opts.help = true;
+            opts.bad_argument = true;
         }
     }
     return opts;
@@ -79,13 +81,34 @@ auto matches_filter(const test_case_entry& entry, std::string_view filter) -> bo
     if (entry.suite.find(filter) != std::string_view::npos) {
         return true;
     }
-    return entry.name.find(filter) != std::string_view::npos;
+    if (entry.name.find(filter) != std::string_view::npos) {
+        return true;
+    }
+    // The qualified spelling, which is what the documentation promises and
+    // what the two checks above do not deliver: they search the suite and the
+    // name separately, so `--filter=options.command_line` -- the spelling
+    // `--list` prints and a reader copies -- matched nothing and selected an
+    // empty set.
+    std::string qualified;
+    qualified.reserve(entry.suite.size() + 1U + entry.name.size());
+    qualified.append(entry.suite).append(".").append(entry.name);
+    return qualified.find(filter) != std::string::npos;
 }
 
 auto run_all(const options& opts) -> int {
     if (opts.help) {
         std::fputs(usage_text.data(), stdout);
         return 0;
+    }
+
+    // An unrecognised argument fails the run rather than printing the usage
+    // and succeeding. The distinction matters most where nobody is reading
+    // the output: a script that passes the wrong flag must not be able to
+    // report a pass, and the usage text is printed either way so the reader
+    // still sees what the flag should have been.
+    if (opts.bad_argument) {
+        std::fputs(usage_text.data(), stdout);
+        return 3;
     }
 
     auto cases = registry::instance().cases();

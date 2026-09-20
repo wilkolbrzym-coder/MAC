@@ -49,3 +49,14 @@ meta_auth_add_failure_test(framework.empty_selection_is_an_error
     OUTPUT_REGEX "no test cases matched filter"
     LABELS "unit"
     TIMEOUT 60)
+
+# A misspelled option must fail the run. It used to exit 0 with the usage
+# text, so a CI job that passed `--filtr=...` ran every case and reported a
+# pass -- the failure mode the runner's exit codes exist to prevent.
+meta_auth_add_failure_test(framework.unknown_argument_is_an_error
+    PROGRAM "$<TARGET_FILE:meta_auth_framework_selftest>"
+    ARGS --filtr=stringify
+    RESULT_REGEX "^3$"
+    OUTPUT_REGEX "unrecognised argument: --filtr=stringify"
+    LABELS "unit"
+    TIMEOUT 60)

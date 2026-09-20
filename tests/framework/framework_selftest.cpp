@@ -293,6 +293,40 @@ META_AUTH_TEST("options", "filter_is_a_substring_match") {
     // A filter is a substring, not a glob: this is documented behaviour, and
     // asserting the negative keeps it from drifting into pattern matching.
     META_AUTH_CHECK(!matches_filter(entry, "capab*"));
+
+    // The qualified spelling: what `--list` prints and what a reader copies
+    // into `--filter=`. Searching the suite and the name separately -- which is
+    // what this did -- means a filter containing the separator matches
+    // nothing, so the most obvious way to run one case selected none.
+    META_AUTH_CHECK(matches_filter(entry, "capability.attenuation_is_monotone"));
+}
+
+META_AUTH_TEST("context", "the_guard_restores_the_sink_it_found") {
+    // The sink is part of the state a guarded scope may change, and the guard
+    // did not put it back: it restored the counters only. That was latent,
+    // because every case cleaned up after itself -- and the first case that did
+    // not would have left a dangling user pointer installed for every case that
+    // followed, in the harness whose job is to make failures visible.
+    using meta_auth::test::isolation_guard;
+    auto& ctx = meta_auth::test::context::instance();
+    capture outer_captured;
+    capture inner_captured;
+
+    ctx.set_sink(&capture::sink, &outer_captured);
+    {
+        const isolation_guard isolated;
+        // A scope that installs its own sink and forgets to remove it: the
+        // guard is what has to undo this.
+        isolated.use_sink(&capture::sink, &inner_captured);
+        META_AUTH_CHECK_EQ(ctx.current_sink_user(), static_cast<void*>(&inner_captured));
+    }
+    META_AUTH_CHECK_EQ(ctx.current_sink(), &capture::sink);
+    META_AUTH_CHECK_EQ(ctx.current_sink_user(), static_cast<void*>(&outer_captured));
+
+    // And the counters came back too, which is the other half of the same
+    // promise.
+    META_AUTH_CHECK_EQ(ctx.stats().cases_failed, std::size_t{0});
+    ctx.set_sink(nullptr, nullptr);
 }
 
 META_AUTH_TEST("options", "command_line_is_parsed") {
@@ -305,12 +339,26 @@ META_AUTH_TEST("options", "command_line_is_parsed") {
     META_AUTH_CHECK_EQ(opts.filter, std::string_view{"capability"});
 }
 
-META_AUTH_TEST("options", "an_unknown_argument_asks_for_help") {
-    // An unrecognised flag must not be ignored: a CI job that passes
-    // `--filtr=...` and gets a full green run is a job that tested nothing.
+META_AUTH_TEST("options", "an_unknown_argument_is_an_error") {
+    // An unrecognised flag must not be ignored, and it must not be taken for
+    // a request for help either. A CI job that passes `--filtr=...` and gets a
+    // full green run is a job that tested nothing -- and "asks for help" was
+    // exactly that green run, because help exits 0.
     const char* argv[] = {"binary", "--nonsense", nullptr};
     const auto opts = meta_auth::test::parse_options(2, argv);
-    META_AUTH_CHECK(opts.help);
+    META_AUTH_CHECK(opts.bad_argument);
+    META_AUTH_CHECK(!opts.help);
+}
+
+META_AUTH_TEST("options", "a_typo_in_a_filter_selects_nothing") {
+    // The concrete keystroke. The exit status is asserted by
+    // tests/framework/CMakeLists.txt, which can observe the process; what is
+    // asserted here is that the typo does not leave a filter behind, because
+    // an empty filter means "run everything".
+    const char* argv[] = {"binary", "--filtr=stringify", nullptr};
+    const auto opts = meta_auth::test::parse_options(2, argv);
+    META_AUTH_CHECK(opts.bad_argument);
+    META_AUTH_CHECK(opts.filter.empty());
 }
 
 META_AUTH_TEST("options", "help_and_list_are_recognised") {

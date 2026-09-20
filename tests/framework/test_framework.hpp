@@ -221,6 +221,14 @@ public:
         sink_user_ = user;
     }
 
+    /// The installed sink and its user pointer, for a scope that has to put
+    /// them back. `isolation_guard` is the only caller, and the names carry
+    /// `current_` because `set_sink` takes a parameter called `sink` -- a
+    /// member function of that name would be shadowed by it, which the warning
+    /// set reports.
+    [[nodiscard]] auto current_sink() const noexcept -> failure_sink { return sink_; }
+    [[nodiscard]] auto current_sink_user() const noexcept -> void* { return sink_user_; }
+
     void begin_case(std::string_view suite, std::string_view name) noexcept {
         suite_ = suite;
         test_name_ = name;
@@ -305,13 +313,23 @@ private:
 class isolation_guard {
 public:
     isolation_guard() noexcept
-        : context_(context::instance()), saved_statistics_(context_.stats()) {
+        : context_(context::instance()), saved_statistics_(context_.stats()),
+          saved_sink_(context_.current_sink()), saved_sink_user_(context_.current_sink_user()) {
         context_.set_case_tracking(false);
     }
 
+    /// Restores everything the guarded scope is allowed to change.
+    ///
+    /// The sink is part of that, and it was not: the comment below said it was,
+    /// while the destructor restored only the counters. Both accessors existed
+    /// and neither was called, so the defect was latent rather than live -- but
+    /// the first test to install a capturing sink and forget to clear it would
+    /// have left a dangling `void*` for every case that followed, in the
+    /// harness that exists to make failures visible.
     ~isolation_guard() {
         context_.set_case_tracking(true);
         context_.stats_mutable() = saved_statistics_;
+        context_.set_sink(saved_sink_, saved_sink_user_);
     }
 
     isolation_guard(const isolation_guard&) = delete;
@@ -319,14 +337,18 @@ public:
     isolation_guard(isolation_guard&&) = delete;
     auto operator=(isolation_guard&&) -> isolation_guard& = delete;
 
-    /// The sink is part of the isolated state as well: a test that installs a
-    /// capturing sink must not leave it installed for the next case.
-    void use_sink(failure_sink sink, void* user) noexcept { context_.set_sink(sink, user); }
-    void clear_sink() noexcept { context_.set_sink(nullptr, nullptr); }
+    // const, because installing a sink does not change the guard: it changes
+    // the context, which the guard only promises to put back.
+    void use_sink(failure_sink sink, void* user) const noexcept {
+        context_.set_sink(sink, user);
+    }
+    void clear_sink() const noexcept { context_.set_sink(nullptr, nullptr); }
 
 private:
     context& context_;
     statistics saved_statistics_;
+    failure_sink saved_sink_;
+    void* saved_sink_user_;
 };
 
 // ---------------------------------------------------------------------------
@@ -546,6 +568,16 @@ struct options {
     bool list = false;
     bool verbose = false;
     bool help = false;
+
+    /// An argument the runner does not recognise.
+    ///
+    /// Separate from `help` because the two used to be the same flag, which
+    /// made a typo indistinguishable from a request: `--filtr=stringify`
+    /// printed the usage text and exited 0. A CI job that mistyped a filter
+    /// therefore ran the *whole* suite and reported success -- the exact
+    /// failure this runner's exit codes exist to prevent, reachable with a
+    /// single keystroke.
+    bool bad_argument = false;
 };
 
 /// `const char* const*` rather than `char**`: the runner never modifies the
