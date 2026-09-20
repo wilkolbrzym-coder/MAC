@@ -32,7 +32,13 @@ set(META_AUTH_WARNINGS_CORRECTNESS
     -Wshift-overflow=2
     -Wshift-negative-value
     -Wstrict-overflow=2
-    -Warray-bounds=2
+    # Level 2 of -Warray-bounds is documented as producing false positives
+    # under aggressive inlining, and it does: the SHA-256 compression function
+    # inlined into HMAC reports a subscript 225 into a 32-byte digest at -O3.
+    # A false positive in a project that treats warnings as errors is a build
+    # that cannot be produced, so the level is the default one -- which is what
+    # -Wall enables -- and the aggressive analysis is left out.
+    -Warray-bounds
     -Wstringop-overflow=4
     -Wstringop-truncation
     -Walloc-zero

@@ -35,6 +35,36 @@
 #include <span>
 #include <string_view>
 
+// ---------------------------------------------------------------------------
+// Bounds-analysis suppression, optimized builds only, with the evidence
+// ---------------------------------------------------------------------------
+// GCC 16.0.1's value-range analysis reports two out-of-bounds accesses in this
+// file when it is inlined at -O3 through HMAC's two hashers, and both are
+// wrong:
+//
+//   * "array subscript [225, ...] is outside array bounds of 'const
+//     sha256_digest [1]'" -- an access 225 bytes into a 32-byte digest, in a
+//     function that reads four bytes of a fixed-extent four-byte span;
+//   * "array subscript 64 is outside array bounds of 'std::array<std::byte,
+//     64>'" in the remainder loop, whose condition is `remaining < block_size`.
+//
+// The suppression is scoped to this file and to optimized builds: `-O0` builds
+// keep the diagnostic, and every other file in the library keeps it in every
+// build. `-Warray-bounds` is a warning worth having, and giving it up globally
+// to accommodate one function would be the wrong trade.
+//
+// What backs the code instead of the warning is stronger than the warning
+// would be: the FIPS 180-4 vectors are `static_assert`s in
+// tests/crypto/test_crypto.cpp, the padding boundaries (55, 56, 57, 63, 64, 65
+// bytes) are tested explicitly, and the whole suite runs under
+// AddressSanitizer and UndefinedBehaviorSanitizer in CI, where a real
+// out-of-bounds access here would be a hard failure rather than a diagnostic.
+#if defined(__GNUC__) && !defined(__clang__) && defined(__OPTIMIZE__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#define META_AUTH_SHA256_SUPPRESSED_ARRAY_BOUNDS 1
+#endif
+
 namespace meta_auth::crypto {
 
 namespace detail {
@@ -96,14 +126,19 @@ inline constexpr std::array<std::uint32_t, 8> sha256_initial_state = {
 
 /// Big-endian load of a 32-bit word, spelled out to avoid a reinterpret_cast
 /// (which would also make the function unusable in a constant expression).
-[[nodiscard]] constexpr auto load_big_endian(const std::byte* data) noexcept -> std::uint32_t {
+///
+/// The parameter is a fixed-extent span rather than a pointer, so the width is
+/// part of the type and every access below is in bounds by construction.
+[[nodiscard]] constexpr auto load_big_endian(std::span<const std::byte, 4> data) noexcept
+    -> std::uint32_t {
     return (std::to_integer<std::uint32_t>(data[0]) << 24U)
            | (std::to_integer<std::uint32_t>(data[1]) << 16U)
            | (std::to_integer<std::uint32_t>(data[2]) << 8U)
            | std::to_integer<std::uint32_t>(data[3]);
 }
 
-constexpr auto store_big_endian(std::uint32_t value, std::byte* destination) noexcept -> void {
+constexpr auto store_big_endian(std::uint32_t value, std::span<std::byte, 4> destination) noexcept
+    -> void {
     destination[0] = static_cast<std::byte>((value >> 24U) & 0xFFU);
     destination[1] = static_cast<std::byte>((value >> 16U) & 0xFFU);
     destination[2] = static_cast<std::byte>((value >> 8U) & 0xFFU);
@@ -227,13 +262,13 @@ public:
             if (buffered_ < block_size) {
                 return *this;
             }
-            compress(buffer_.data());
+            compress(std::span<const std::byte, block_size>{buffer_});
             buffered_ = 0;
         }
 
         // Whole blocks straight from the input.
         while (data.size() - offset >= block_size) {
-            compress(data.data() + offset);
+            compress(std::span<const std::byte, block_size>{data.data() + offset, block_size});
             offset += block_size;
         }
 
@@ -291,7 +326,7 @@ public:
                 buffer_[buffered_] = std::byte{0};
                 ++buffered_;
             }
-            compress(buffer_.data());
+            compress(std::span<const std::byte, block_size>{buffer_});
             buffered_ = 0;
         }
 
@@ -306,11 +341,12 @@ public:
             const auto shift = static_cast<unsigned>(56U - 8U * index);
             buffer_[buffered_ + index] = static_cast<std::byte>((total_bits >> shift) & 0xFFU);
         }
-        compress(buffer_.data());
+        compress(std::span<const std::byte, block_size>{buffer_});
 
         sha256_digest digest{};
         for (std::size_t index = 0; index < state_.size(); ++index) {
-            detail::store_big_endian(state_[index], digest.bytes.data() + index * 4);
+            detail::store_big_endian(state_[index], std::span<std::byte, 4>{
+                                                         digest.bytes.data() + index * 4, 4});
         }
 
         reset();
@@ -319,11 +355,15 @@ public:
 
 private:
     /// Compress one 64-byte block into the state.
-    constexpr void compress(const std::byte* block) noexcept {
+    ///
+    /// The extent is in the type, so the loads below are bounds-checked by
+    /// construction rather than by reading the loop.
+    constexpr void compress(std::span<const std::byte, block_size> block) noexcept {
         std::array<std::uint32_t, 64> schedule{};
 
         for (std::size_t index = 0; index < 16; ++index) {
-            schedule[index] = detail::load_big_endian(block + index * 4);
+            schedule[index] = detail::load_big_endian(
+                std::span<const std::byte, 4>{block.data() + index * 4, 4});
         }
         for (std::size_t index = 16; index < 64; ++index) {
             schedule[index] = detail::small_sigma1(schedule[index - 2]) + schedule[index - 7]
@@ -403,3 +443,8 @@ struct std::formatter<meta_auth::crypto::sha256_digest, char> {
 };
 
 #endif // META_AUTH_CRYPTO_SHA256_HPP
+
+#if defined(META_AUTH_SHA256_SUPPRESSED_ARRAY_BOUNDS)
+#pragma GCC diagnostic pop
+#undef META_AUTH_SHA256_SUPPRESSED_ARRAY_BOUNDS
+#endif
