@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# meta-auth-core code style.
+#
+# Deliberately close to the default LLVM style, with the deviations that a
+# header-only C++26 library actually needs:
+#   * 100-column limit (matches .editorconfig),
+#   * 4-space indentation,
+#   * namespaces are never indented, so the namespace nesting of this library
+#     does not push code off the right edge,
+#   * `requires` clauses stay on the line that introduces them, which keeps
+#     constrained declarations readable.
+# ---------------------------------------------------------------------------
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++26
+
+ColumnLimit: 100
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+NamespaceIndentation: None
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+PackConstructorInitializers: Never
+PenaltyReturnTypeOnItsOwnLine: 200
+SeparateDefinitionBlocks: Always
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Project headers first: they are the interface the translation unit exercises.
+  - Regex: '^"meta_auth/'
+    Priority: 1
+  # Then the C++ standard library.
+  - Regex: '^<[a-z_]+>$'
+    Priority: 2
+  - Regex: '^<bits/'
+    Priority: 3
+  # Anything else (platform headers) last.
+  - Regex: '.*'
+    Priority: 4
+SpaceAfterTemplateKeyword: false
+SpaceBeforeCpp11BracedList: false

@@ -1,0 +1,56 @@
+# ---------------------------------------------------------------------------
+# meta-auth-core -- build artifacts and tooling scratch space
+# ---------------------------------------------------------------------------
+
+# Out-of-source build trees (see CMakePresets.json for the canonical layout).
+build/
+build-*/
+out/
+cmake-build-*/
+
+# CMake state
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Testing/
+_deps/
+*.cmake.in.stamp
+
+# Compiler / linker intermediates
+*.o
+*.obj
+*.lo
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.gcno
+*.gcda
+*.gcov
+*.profraw
+*.profdata
+*.lto
+*.d
+
+# Compile-failure test transcripts
+compile_fail_out/
+
+# Editor and IDE state
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.clangd/
+compile_commands.json
+.cache/
+
+# OS noise
+.DS_Store
+Thumbs.db

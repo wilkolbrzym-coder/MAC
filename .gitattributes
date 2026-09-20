@@ -1,0 +1,14 @@
+# ---------------------------------------------------------------------------
+# Normalise line endings so the repository is byte-identical on every platform.
+# ---------------------------------------------------------------------------
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary
+*.gcda binary
+*.gcno binary
+*.profraw binary
+
+# Keep generated baselines out of language statistics.
+tests/compile_fail/expected/*.txt linguist-generated=true
