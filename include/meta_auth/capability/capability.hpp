@@ -250,21 +250,39 @@ public:
     /// object what it grants without naming its type.
     [[nodiscard]] static constexpr auto rights_value() noexcept -> rights_set { return Rights; }
 
+    /// A capability cannot be created out of nothing.
+    ///
+    /// There was no default constructor before, so the program was rejected
+    /// correctly and the diagnostic said "no matching function for call to
+    /// 'capability<...>::capability()'" next to a dozen candidate notes. The
+    /// declaration exists so the rejection states the rule instead.
+    capability() = delete(
+        "A capability cannot be constructed. Only an authority can create one: call mint() on an "
+        "authority, take one from a gate's caller, or obtain one by delegation.");
+
     /// Affine: no copy constructor, no copy assignment.
     ///
     /// This is the property that makes duplication explicit. A program that
     /// wants two capabilities must delegate, which requires `grant`, so a
     /// capability that has been handed out cannot be multiplied by accident.
-    capability(const capability&) = delete;
-    auto operator=(const capability&) -> capability& = delete;
+    ///
+    /// The diagnostic is spelled out because this is the rejection a developer
+    /// meets while writing ordinary-looking code, and "use of deleted
+    /// function" does not say what to write instead.
+    capability(const capability&) = delete(
+        "A capability cannot be copied. Authority is handed on with delegate(), which requires "
+        "right::grant, or weakened with attenuate(), which consumes this one.");
+    auto operator=(const capability&) -> capability& = delete(
+        "A capability cannot be copied. Authority is handed on with delegate(), which requires "
+        "right::grant, or weakened with attenuate(), which consumes this one.");
 
     constexpr capability(capability&& other) noexcept
-        : serial_(other.serial_), epoch_(other.epoch_), parent_(other.parent_) {
+        : serial_(other.serial_), epoch_(other.epoch_), parent_(other.parent_),
+          valid_(other.valid_) {
         // The moved-from capability is neutralised rather than left holding a
         // valid serial: two capabilities claiming the same serial would make
         // an audit trail ambiguous exactly where it matters.
-        other.serial_ = 0;
-        other.parent_ = std::nullopt;
+        other.neutralise();
     }
 
     constexpr auto operator=(capability&& other) noexcept -> capability& {
@@ -272,16 +290,25 @@ public:
             serial_ = other.serial_;
             epoch_ = other.epoch_;
             parent_ = other.parent_;
-            other.serial_ = 0;
-            other.parent_ = std::nullopt;
+            valid_ = other.valid_;
+            other.neutralise();
         }
         return *this;
     }
 
     ~capability() = default;
 
+    /// True when this capability still holds authority.
+    ///
+    /// False for a capability that has been moved from or consumed by
+    /// `attenuate`. Such a value is still a well-formed object of this type --
+    /// it has to be, or moving would not be possible -- but it no longer
+    /// *is* a capability, and both `has` and `is_live` report that rather than
+    /// answering from the fields the object still happens to carry.
+    [[nodiscard]] constexpr auto is_valid() const noexcept -> bool { return valid_; }
+
     [[nodiscard]] constexpr auto has(right value) const noexcept -> bool {
-        return Rights.contains(value);
+        return valid_ && Rights.contains(value);
     }
 
     /// True when this capability grants everything `Required` names. Used by
@@ -308,7 +335,7 @@ public:
 
     /// True when the resource's current epoch still matches this capability's.
     [[nodiscard]] auto is_live() const noexcept -> bool {
-        return epoch_is_current(epoch_, current_epoch<Resource>());
+        return valid_ && epoch_is_current(epoch_, current_epoch<Resource>());
     }
 
     /// Weaken, keeping the result. Consumes the capability.
@@ -317,10 +344,20 @@ public:
     /// exactly one capability, and it is the weaker one. A holder that wants
     /// to keep the stronger capability *and* hand out a weaker one must
     /// delegate, which requires the `grant` right.
+    ///
+    /// The source is neutralised, and that is not decoration. It was not, and
+    /// the consequence was that `std::move(strong).attenuate<weaker>()` left
+    /// `strong` fully usable -- so any capability could be duplicated at will,
+    /// without `grant`, while the documentation promised that duplication
+    /// requires delegation. Attenuation and delegation are different
+    /// operations precisely because one consumes and the other does not; this
+    /// is where that difference is enforced.
     template <rights_set Smaller>
         requires(Smaller.is_subset_of(Rights))
     [[nodiscard]] constexpr auto attenuate() && noexcept -> capability<Resource, Smaller> {
-        return capability<Resource, Smaller>{serial_, epoch_, serial_};
+        capability<Resource, Smaller> weakened{serial_, epoch_, serial_, valid_};
+        neutralise();
+        return weakened;
     }
 
     template <rights_set Smaller>
@@ -338,7 +375,7 @@ public:
     template <rights_set Smaller>
         requires(Smaller.is_subset_of(Rights) && Rights.contains(delegation_right))
     [[nodiscard]] constexpr auto delegate() const noexcept -> capability<Resource, Smaller> {
-        return capability<Resource, Smaller>{serial_, epoch_, serial_};
+        return capability<Resource, Smaller>{serial_, epoch_, serial_, valid_};
     }
 
     /// Delegation without the `grant` right.
@@ -366,12 +403,25 @@ private:
     friend class authority;
 
     constexpr capability(std::uint64_t serial, revocation_epoch epoch,
-                         std::optional<std::uint64_t> parent) noexcept
-        : serial_(serial), epoch_(epoch), parent_(parent) {}
+                         std::optional<std::uint64_t> parent, bool valid = true) noexcept
+        : serial_(serial), epoch_(epoch), parent_(parent), valid_(valid) {}
+
+    /// Drop the authority without destroying the object.
+    ///
+    /// The serial is cleared as well as the validity flag: a serial is what an
+    /// audit record uses to name the capability that was used, and a
+    /// neutralised value that still reports one invites a record that points
+    /// at a capability nobody presented.
+    constexpr void neutralise() noexcept {
+        serial_ = 0;
+        parent_ = std::nullopt;
+        valid_ = false;
+    }
 
     std::uint64_t serial_ = 0;
     revocation_epoch epoch_{};
     std::optional<std::uint64_t> parent_{};
+    bool valid_ = true;
 };
 
 /// A capability is never a reference to shared state, so it can be used across

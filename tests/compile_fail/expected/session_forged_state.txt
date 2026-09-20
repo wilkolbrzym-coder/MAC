@@ -1,0 +1,4 @@
+# A session state cannot be named without a core, and a core cannot be made.
+A session core cannot be created directly
+# The rejection must be about the core, not about some unrelated type.
+!session_state_invalid

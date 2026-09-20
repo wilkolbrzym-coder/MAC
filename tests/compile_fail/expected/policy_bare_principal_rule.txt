@@ -1,0 +1,3 @@
+# A rule names a pattern. The bare principal is refused where the rule is
+# written, and the sentence is this library's, so every compiler prints it.
+a policy rule's principal pattern must be exactly<Principal> or any_principal<Kind>

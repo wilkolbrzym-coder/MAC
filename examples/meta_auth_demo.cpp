@@ -105,13 +105,13 @@ void expect(bool condition, std::string_view what) {
 /// A proof that the policy allows an operation. A helper per request, because
 /// `authorize` is `consteval` and has to be called in a constant expression.
 [[nodiscard]] consteval auto allow_observe() noexcept
-    -> authorization<resource_kind::devices, action::observe> {
+    -> authorization<resource_kind::devices, action::observe, operator_principal> {
     return authorize<application_policy, operator_principal, resource_kind::devices,
                      action::observe>();
 }
 
 [[nodiscard]] consteval auto allow_modify() noexcept
-    -> authorization<resource_kind::devices, action::modify> {
+    -> authorization<resource_kind::devices, action::modify, operator_principal> {
     return authorize<application_policy, operator_principal, resource_kind::devices,
                      action::modify>();
 }

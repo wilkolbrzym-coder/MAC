@@ -45,6 +45,13 @@ using device_resource = named_resource<"devices">;
 using session_resource = named_resource<"sessions">;
 using audit_resource = named_resource<"audit-log">;
 
+/// A resource no other test uses, so that its serial counter is observably at
+/// its origin. A local class cannot carry static data members, hence its
+/// placement here.
+struct fresh_resource {
+    static constexpr std::string_view name = "fresh";
+};
+
 constexpr rights_set read_only{right::read};
 constexpr rights_set read_write{right::read, right::write};
 constexpr rights_set everything = rights_set::all();
@@ -159,10 +166,22 @@ META_AUTH_TEST("capability", "serials_are_unique_per_resource") {
     // Counters are per resource type, so the two authorities do not share a
     // sequence -- which is what lets a serial be interpreted without also
     // knowing the resource.
-    const auto device_serial = device_authority.mint<read_only>().serial();
-    const auto session_serial = session_authority.mint<read_only>().serial();
-    META_AUTH_CHECK(device_serial >= 64);
-    META_AUTH_CHECK(session_serial >= 1);
+    //
+    // The claim is an *independence* claim, and the previous version of this
+    // test could not see it: `device_serial >= 64` and `session_serial >= 1`
+    // are both satisfied by one global counter, so the test passed for an
+    // implementation that shared a sequence -- which is the defect it exists
+    // to catch. A resource type used nowhere else is what makes a counter's
+    // origin observable: its first mint carries serial one however much
+    // minting has happened for other resources.
+    authority<fresh_resource, read_only> fresh_authority;
+    META_AUTH_CHECK_EQ(fresh_authority.mint<read_only>().serial(), std::uint64_t{1});
+
+    // Minting for one resource does not disturb another's sequence.
+    const auto device_before = device_authority.mint<read_only>().serial();
+    static_cast<void>(session_authority.mint<read_only>());
+    const auto device_after = device_authority.mint<read_only>().serial();
+    META_AUTH_CHECK_EQ(device_after, device_before + 1U);
 }
 
 /// The compile-time entry point reserves serial zero, which is what makes it
@@ -212,6 +231,59 @@ META_AUTH_TEST("capability", "attenuation_preserves_provenance_and_serial") {
     META_AUTH_CHECK_EQ(weak.serial(), original_serial);
     META_AUTH_REQUIRE(weak.parent_serial().has_value());
     META_AUTH_CHECK_EQ(*weak.parent_serial(), original_serial);
+}
+
+META_AUTH_TEST("capability", "attenuation_consumes_the_capability_it_weakened") {
+    // The difference between attenuation and delegation is that one consumes
+    // and the other does not. It did not: `std::move(strong).attenuate<...>()`
+    // left `strong` fully usable, so any capability could be duplicated
+    // without `grant` -- and the documentation promised that duplication
+    // requires delegation.
+    authority<device_resource, everything> root;
+    auto strong = root.mint<everything>();
+
+    auto weak = std::move(strong).attenuate<read_only>();
+
+    META_AUTH_CHECK(weak.is_valid());
+    META_AUTH_CHECK(weak.has(right::read));
+
+    META_AUTH_CHECK(!strong.is_valid());
+    META_AUTH_CHECK_EQ(strong.serial(), std::uint64_t{0});
+    // `has` answers from the object's state, so a spent capability holds
+    // nothing -- not even the rights its type still names. Without this the
+    // type would keep granting what the value has already given away.
+    META_AUTH_CHECK(!strong.has(right::read));
+    META_AUTH_CHECK(!strong.has(right::revoke));
+}
+
+META_AUTH_TEST("capability", "a_neutralised_capability_is_not_live") {
+    // Liveness is asked before every admission, and a spent capability is not
+    // live even in an epoch where nothing has been revoked -- the distinction
+    // between "still current" and "still a capability" has to survive the
+    // epoch check, or a revoked-capability test would be the only thing
+    // catching a spent one.
+    authority<device_resource, read_only> root;
+    auto original = root.mint<read_only>();
+
+    META_AUTH_CHECK(original.is_live());
+    auto moved = std::move(original);
+    META_AUTH_CHECK(moved.is_live());
+    META_AUTH_CHECK(!original.is_live());
+}
+
+META_AUTH_TEST("capability", "delegation_does_not_consume_the_delegator") {
+    // The other half of the pair: delegation leaves the delegator usable,
+    // which is the whole reason it requires `grant`.
+    authority<device_resource, read_and_grant> root;
+    auto delegator = root.mint<read_and_grant>();
+
+    auto handed_out = delegator.delegate<read_only>();
+
+    META_AUTH_CHECK(delegator.is_valid());
+    META_AUTH_CHECK(delegator.has(right::read));
+    META_AUTH_CHECK(delegator.has(right::grant));
+    META_AUTH_CHECK(handed_out.is_valid());
+    META_AUTH_CHECK(handed_out.has(right::read));
 }
 
 META_AUTH_TEST("capability", "delegation_preserves_provenance_and_leaves_the_original_intact") {

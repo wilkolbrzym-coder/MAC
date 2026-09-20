@@ -18,6 +18,20 @@
 //      trail of a running process. Each slot carries a stamp written before and
 //      after its fields, so a reader detects a torn record and retries rather
 //      than reporting a mixture of two events.
+//
+//      The stamp detects *a* writer's interruption, which is a different thing
+//      from detecting two writers in one slot -- and the reader of this comment
+//      should know which one is guaranteed. The protocol is a seqlock, and a
+//      seqlock assumes a single writer per slot. Here the slot is chosen as
+//      `sequence & (capacity - 1)`, so two writers collide only when their
+//      sequence numbers differ by exactly `capacity` -- 256. That requires 256
+//      appends to be in flight at once, which is far beyond the concurrency
+//      this library is used at (the benchmark and the tests run one writer per
+//      thread, dozens of threads). The guarantee is therefore stated with its
+//      bound: **up to `capacity` concurrent writers, a reader never returns a
+//      mixture of two records.** Beyond that the bound is not claimed, and the
+//      fix would be per-slot mutual exclusion, which the "never blocks"
+//      requirement above rules out.
 //    * **A record must not dangle.** Names are stored as their 64-bit hashes
 //      rather than as views, so a record stays valid after the string it came
 //      from is gone. Rendering resolves a hash through the principal and
@@ -47,6 +61,14 @@ namespace meta_auth {
 /// A denial carries its reason, because "denied" alone cannot be acted on: an
 /// operator needs to know whether to enroll a device, widen a policy or
 /// investigate a forgery.
+/// The outcome vocabulary is shared with the code that *calls* the gate: a
+/// consumer that mediates sessions or presents its own resource can record
+/// `denied_unauthenticated`, `denied_policy` or `denied_unavailable` in the
+/// same trail, and an operator reading a mixed trail gets one vocabulary
+/// instead of two. This library's own mediator produces five of the seven --
+/// `granted`, `denied_insufficient_rights`, `denied_revoked`,
+/// `denied_neutralised` and (from the revocation path) none -- which is why
+/// the remaining three are documented here rather than left looking unused.
 enum class audit_outcome : std::uint8_t {
     granted = 0,
     denied_insufficient_rights = 1,
@@ -54,6 +76,7 @@ enum class audit_outcome : std::uint8_t {
     denied_policy = 3,
     denied_unauthenticated = 4,
     denied_unavailable = 5,
+    denied_neutralised = 6,
 };
 
 [[nodiscard]] constexpr auto to_string(audit_outcome outcome) noexcept -> std::string_view {
@@ -70,6 +93,8 @@ enum class audit_outcome : std::uint8_t {
         return "denied:unauthenticated";
     case audit_outcome::denied_unavailable:
         return "denied:unavailable";
+    case audit_outcome::denied_neutralised:
+        return "denied:neutralised";
     }
     return "unknown";
 }

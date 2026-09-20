@@ -91,6 +91,13 @@ enum class action : std::uint8_t {
 /// stated. `delegate` maps to `grant` rather than to a right of its own, which
 /// is what makes "you cannot delegate what you cannot delegate" a single rule
 /// rather than two.
+///
+/// The fall-through returns `right::revoke` rather than `right::read`. Both are
+/// unreachable for a valid enumerator -- the switch is exhaustive and
+/// `-Wswitch-enum` keeps it so -- but if a future enumerator slips past the
+/// switch, the failure must be in the direction that denies access, and `read`
+/// is the weakest right in the lattice. `revoke` is the strongest, so an
+/// unmapped action demands the most authority instead of the least.
 [[nodiscard]] constexpr auto required_right(action value) noexcept -> right {
     switch (value) {
     case action::observe:
@@ -106,7 +113,7 @@ enum class action : std::uint8_t {
     case action::audit:
         return right::audit;
     }
-    return right::read;
+    return right::revoke;
 }
 
 /// The resources this library mediates.
@@ -170,6 +177,10 @@ inline constexpr std::size_t resource_kind_count = 5;
 template <principal_kind Kind>
 struct any_principal {
     static constexpr principal_kind kind = Kind;
+
+    /// The member `pattern_matches` discriminates on. Distinct from `kind`,
+    /// which every principal type has as well -- see the note there.
+    static constexpr principal_kind any_of_kind = Kind;
 };
 
 /// Exactly one principal.
@@ -178,12 +189,81 @@ struct exactly {
     using principal = Principal;
 };
 
+/// The one sentence every rejection of a malformed principal pattern uses.
+///
+/// A macro rather than a constant because `static_assert` needs a string
+/// literal, and because three copies of a sentence that must agree are three
+/// chances for them to stop agreeing.
+#define META_AUTH_PRINCIPAL_PATTERN_MESSAGE                                         \
+    "a policy rule's principal pattern must be exactly<Principal> or "              \
+    "any_principal<Kind>. A bare principal type is not a pattern: it reads like "   \
+    "one principal and would mean every principal of its kind."
+
+namespace detail {
+
+/// A dependent `false`, for a diagnostic that must fire only when a template is
+/// actually instantiated with the offending type.
+template <typename>
+inline constexpr bool dependent_false = false;
+
+} // namespace detail
+
+/// True when `Pattern` is one of the two spellings a rule may use.
+///
+/// The discriminator is not "does it have a `principal` member", because that
+/// question has a surprising answer. `principal<Name, Kind>` carries an
+/// *injected-class-name*, so `typename principal<...>::principal` is valid and
+/// names the class itself -- which means a bare principal type looks exactly
+/// like `exactly<something>` to a member-detection test. The check is therefore
+/// whether the member resolves to the enclosing type: that is true only for the
+/// injected name, and it is what distinguishes
+///
+///     exactly<admin_principal>   // a pattern: this one principal
+///     admin_principal            // not a pattern at all
+///
+/// A bare `principal<...>` would otherwise have been read as `exactly<itself>`
+/// -- which is the *safe* reading, and therefore the more dangerous one: it
+/// would have looked correct in every test and quietly meant something the
+/// author never wrote.
+template <typename Pattern>
+[[nodiscard]] consteval auto is_principal_pattern() noexcept -> bool {
+    if constexpr (requires { typename Pattern::principal; }) {
+        return !std::is_same_v<typename Pattern::principal, Pattern>;
+    } else if constexpr (requires { Pattern::any_of_kind; }) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+/// True when a rule's principal pattern covers `Candidate`.
+///
+/// `any_principal<Kind>` and `exactly<Principal>` are the whole vocabulary. The
+/// widening this replaces was real: the matcher used to ask
+/// `requires { Pattern::kind; }`, and *every* `principal<Name, Kind>` has a
+/// `static constexpr principal_kind kind`, so a rule written
+///
+///     allow<resource_kind::devices, action::revoke, admin_principal>
+///
+/// fell through to the kind branch and granted `revoke` to every principal of
+/// kind user -- one principal written, all of them authorised.
 template <typename Pattern, principal_type Candidate>
 [[nodiscard]] consteval auto pattern_matches() noexcept -> bool {
-    if constexpr (requires { Pattern::kind; }) {
-        return Candidate::kind == Pattern::kind;
+    if constexpr (requires { typename Pattern::principal; }) {
+        if constexpr (std::is_same_v<typename Pattern::principal, Pattern>) {
+            // The injected-class-name: a bare principal type was written.
+            static_assert(detail::dependent_false<Pattern>,
+                          META_AUTH_PRINCIPAL_PATTERN_MESSAGE);
+            return false;
+        } else {
+            return std::is_same_v<typename Pattern::principal, Candidate>;
+        }
+    } else if constexpr (requires { Pattern::any_of_kind; }) {
+        return Candidate::kind == Pattern::any_of_kind;
     } else {
-        return std::is_same_v<typename Pattern::principal, Candidate>;
+        static_assert(detail::dependent_false<Pattern>,
+                      META_AUTH_PRINCIPAL_PATTERN_MESSAGE);
+        return false;
     }
 }
 
@@ -203,6 +283,15 @@ struct allow {
     static constexpr resource_kind resource = Resource;
     static constexpr action action_value = Action;
     static constexpr std::size_t who_count = sizeof...(Who);
+
+    /// Checked where the rule is written, not where it is evaluated.
+    ///
+    /// The matcher below raises the same objection, but only once a request
+    /// reaches this rule -- and a rule that is never exercised is exactly the
+    /// rule an unexercised widening hides in. The check belongs at the
+    /// declaration.
+    static_assert((is_principal_pattern<Who>() && ...),
+                  META_AUTH_PRINCIPAL_PATTERN_MESSAGE);
 
     template <principal_type Candidate>
     [[nodiscard]] static consteval auto matches() noexcept -> bool {
@@ -325,27 +414,50 @@ template <typename Policy, principal_type Principal, resource_kind Resource, act
 /// Opaque: the constructor is private and `authorize` is the only function that
 /// can produce one, so a protected operation that takes an `authorization`
 /// cannot be reached without the decision having been made. The proof carries
-/// the resource and the action so that a gate can audit *what* was authorised
-/// rather than merely that something was.
-template <resource_kind Resource, action Action>
+/// the resource, the action *and the principal* so that a gate can audit what
+/// was authorised, on whose behalf, rather than merely that something was.
+///
+/// Carrying the principal is what stops a proof from being presented for
+/// somebody else. The gate takes the principal as a template parameter in the
+/// same position, so a proof obtained for one principal cannot be passed to an
+/// admission that claims another: the types do not match and the program does
+/// not compile. Before that, `admit<Action, Rights, SomeOtherPrincipal>` would
+/// accept any proof for that resource and action -- and name
+/// `SomeOtherPrincipal` in the audit record, which is a stolen token that also
+/// writes somebody else's name in the log.
+template <resource_kind Resource, action Action, principal_type Principal>
 class authorization {
 public:
     static constexpr resource_kind resource = Resource;
     static constexpr action action_value = Action;
+    using subject_type = Principal;
 
     authorization(const authorization&) = delete;
     auto operator=(const authorization&) -> authorization& = delete;
-    authorization(authorization&&) noexcept = default;
-    auto operator=(authorization&&) noexcept -> authorization& = default;
+
+    /// Move is written out rather than defaulted, and that is not style.
+    ///
+    /// A defaulted move constructor is trivial, and a trivial move is what
+    /// makes this empty class *trivially copyable* -- which it was, and which
+    /// meant `std::bit_cast<authorization<...>>(std::array<std::byte, 1>{})`
+    /// produced a valid-looking proof without the policy ever being
+    /// evaluated. One line, no friend access, no cast that looks unusual. A
+    /// user-provided move makes the class non-trivially-copyable, so
+    /// `bit_cast` is ill-formed, and the only remaining way to obtain a proof
+    /// is to satisfy `authorize`'s constraint.
+    constexpr authorization(authorization&&) noexcept {}
+
+    constexpr auto operator=(authorization&&) noexcept -> authorization& { return *this; }
+
     ~authorization() = default;
 
 private:
     /// `authorize` is the only friend, so the only way to obtain the proof is
     /// to have the decision made. A public issuer would make the proof
     /// decorative.
-    template <typename Policy, principal_type Principal, resource_kind R, action A>
-        requires(evaluate<Policy, Principal, R, A>() == decision::allow)
-    friend consteval auto authorize() noexcept -> authorization<R, A>;
+    template <typename Policy, principal_type P, resource_kind R, action A>
+        requires(evaluate<Policy, P, R, A>() == decision::allow)
+    friend consteval auto authorize() noexcept -> authorization<R, A, P>;
 
     constexpr authorization() noexcept = default;
 };
@@ -357,8 +469,8 @@ private:
 /// that names what was asked for.
 template <typename Policy, principal_type Principal, resource_kind Resource, action Action>
     requires(evaluate<Policy, Principal, Resource, Action>() == decision::allow)
-[[nodiscard]] consteval auto authorize() noexcept -> authorization<Resource, Action> {
-    return authorization<Resource, Action>{};
+[[nodiscard]] consteval auto authorize() noexcept -> authorization<Resource, Action, Principal> {
+    return authorization<Resource, Action, Principal>{};
 }
 
 template <typename Policy, principal_type Principal, resource_kind Resource, action Action>
@@ -367,6 +479,19 @@ consteval auto authorize() noexcept = delete(
     "policy: denied by default. No rule in this policy grants this principal this action on this "
     "resource. Either the request is wrong or the policy is missing a rule -- and adding the rule "
     "is a deliberate act, which is the point.");
+
+/// A proof that exists only as a type, for the assertions about it.
+///
+/// The static checks below are written against types rather than values so that
+/// they hold in a build with contracts disabled, where constructing one would
+/// have to go through the fallback path.
+static_assert(!std::is_copy_constructible_v<authorization<resource_kind::devices,
+                                                          action::observe, admin_principal>>,
+              "a proof is move-only: one proof authorises one operation");
+static_assert(!std::is_trivially_copyable_v<authorization<resource_kind::devices,
+                                                          action::observe, admin_principal>>,
+              "a proof must not be trivially copyable, or std::bit_cast forges one without the "
+              "policy ever being evaluated");
 
 } // namespace meta_auth
 
@@ -407,3 +532,7 @@ struct std::formatter<meta_auth::decision, char> {
 };
 
 #endif // META_AUTH_AUTH_POLICY_HPP
+
+// The message macro exists for the three `static_assert`s above and is not part
+// of the vocabulary a consumer sees.
+#undef META_AUTH_PRINCIPAL_PATTERN_MESSAGE

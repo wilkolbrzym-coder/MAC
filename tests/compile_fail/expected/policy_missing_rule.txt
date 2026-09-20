@@ -1,3 +1,4 @@
-static assertion failed
+# An incomplete policy is refused by the policy's own assertion, whose text is
+# this library's and therefore identical on every compiler.
 does not cover every resource kind
 Deny-by-default means an uncovered resource is unusable

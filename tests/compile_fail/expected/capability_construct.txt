@@ -1,4 +1,4 @@
-# A capability cannot be created out of nothing: the only constructor is
-# private, so this is a call to a constructor that does not exist.
-no matching function for call to
-capability
+# A capability cannot come from nowhere, and the diagnostic says so because the
+# declaration is deleted with a message rather than merely absent.
+A capability cannot be constructed. Only an authority can create one
+!no matching function

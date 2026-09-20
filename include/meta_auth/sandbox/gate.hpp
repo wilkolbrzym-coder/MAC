@@ -116,9 +116,24 @@ public:
     ///
     /// The proof is taken by value: it is move-only, and consuming it means one
     /// proof authorises one operation rather than a session's worth of them.
+    ///
+    /// `Principal` appears twice on purpose -- once as a template argument and
+    /// once inside the proof's type -- so the two are required to agree. A
+    /// proof obtained for one principal therefore cannot be presented by an
+    /// admission claiming another: the call does not compile, and the record
+    /// names the principal the policy actually decided for.
+    ///
+    /// `principal_label` is a *label*, not an identity. When it is non-empty
+    /// the record stores a hash of the string the caller supplied instead of
+    /// the principal's numeric id, so a caller can put any name in the trail.
+    /// That is the point of the parameter -- a service that knows its caller by
+    /// a name the policy has never seen needs to say so -- and it means the
+    /// field is evidence of what the caller claimed, not of who it was. The
+    /// principal that the *decision* was made for is the one in the proof's
+    /// type; that half cannot be chosen by the caller.
     template <action Action, rights_set Rights, principal_type Principal>
     [[nodiscard]] auto admit(const capability<resource_type, Rights>& presented,
-                             authorization<Resource, Action> proof,
+                             authorization<Resource, Action, Principal> proof,
                              std::string_view principal_label = {}) noexcept -> status {
         static_assert(Rights.is_subset_of(rights_set::all()),
                       "a capability's rights are always a subset of the defined rights");
@@ -127,6 +142,16 @@ public:
 
         const audit_event base =
             make_event<Action, Principal>(presented, principal_label);
+
+        if (!presented.is_valid()) {
+            // A spent value: moved from, or consumed by `attenuate`. Recorded
+            // apart from a missing right, because it says something different
+            // about the caller -- not "you never held this" but "this token
+            // has already been used up", which is a defect in the caller and
+            // worth being able to see in the trail.
+            record(base, audit_outcome::denied_neutralised);
+            return failure(auth_error::capability_neutralised);
+        }
 
         if (!presented.has(required)) {
             record(base, audit_outcome::denied_insufficient_rights);
@@ -145,6 +170,25 @@ public:
         static_cast<void>(proof); // consumed; the decision it proved was made above
         return success();
     }
+
+    /// A proof issued for a different principal.
+    ///
+    /// The primary overload above takes the principal twice -- once as a
+    /// template argument and once inside the proof's type -- so a mismatch
+    /// between them is a contradiction rather than a conversion. Without this
+    /// declaration the compiler reports that contradiction as "cannot convert
+    /// 'authorization<...operator...>' to 'authorization<...admin...>'", which
+    /// is accurate and tells the reader nothing about why the proof carries a
+    /// principal at all.
+    template <action Action, rights_set Rights, principal_type Principal,
+              principal_type OtherPrincipal>
+        requires(!std::is_same_v<Principal, OtherPrincipal>)
+    auto admit(const capability<resource_type, Rights>&,
+               authorization<Resource, Action, OtherPrincipal>,
+               std::string_view principal_label = {}) noexcept = delete(
+        "gate::admit: the policy proof was issued for a different principal than the one this "
+        "admission names. A proof is bound to its principal -- it records who the policy decided "
+        "for -- so obtain one for the principal that is acting.");
 
     /// The trail this gate records into.
     [[nodiscard]] auto trail() noexcept -> audit_trail& { return *trail_; }
@@ -219,7 +263,7 @@ public:
     /// Read the value. Requires `observe` and the `read` right.
     template <rights_set Rights, principal_type Principal>
     [[nodiscard]] auto read(const capability<resource_type, Rights>& presented,
-                            authorization<Resource, action::observe> proof,
+                            authorization<Resource, action::observe, Principal> proof,
                             gate<Resource>& mediator,
                             std::string_view principal_label = {}) const -> result<T> {
         // The admission is bound to a local before the propagation macro sees
@@ -234,7 +278,7 @@ public:
     /// Replace the value. Requires `modify` and the `write` right.
     template <rights_set Rights, principal_type Principal>
     [[nodiscard]] auto write(const capability<resource_type, Rights>& presented,
-                             authorization<Resource, action::modify> proof,
+                             authorization<Resource, action::modify, Principal> proof,
                              gate<Resource>& mediator, T replacement,
                              std::string_view principal_label = {}) -> status {
         const status admission = mediator.template admit<action::modify, Rights, Principal>(

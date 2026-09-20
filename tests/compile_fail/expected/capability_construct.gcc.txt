@@ -1,0 +1,2 @@
+use of deleted function
+capability() [with Resource

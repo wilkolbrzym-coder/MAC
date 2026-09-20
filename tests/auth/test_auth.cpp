@@ -13,8 +13,10 @@
 #include "meta_auth/auth/session.hpp"
 #include "test_framework.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +32,7 @@ using meta_auth::operator_principal;
 using meta_auth::policy;
 using meta_auth::principal_kind;
 using meta_auth::resource_kind;
+using meta_auth::auditor_principal;
 using meta_auth::second_factor;
 using meta_auth::session;
 using meta_auth::session_state;
@@ -137,6 +140,73 @@ constexpr std::string_view operator_second_factor = "operator-totp-000000";
     }
     return decision::deny;
 }
+
+/// The number of action enumerators, derived from reflection where it is
+/// available so that adding one cannot leave the matrix quietly short.
+#if META_AUTH_HAS_REFLECTION
+inline constexpr std::size_t action_count =
+    std::meta::enumerators_of(^^meta_auth::action).size();
+#else
+inline constexpr std::size_t action_count = 6;
+#endif
+
+/// A principal of each kind that *no rule names by name*.
+///
+/// `representative` above answers a different question -- "which principal
+/// satisfies this pattern" -- and for `any_principal<user>` that answer is the
+/// operator, who is also named by `exactly` rules. The matrix below asks what
+/// an ordinary principal of the kind may do, so it needs a principal the policy
+/// has no `exactly` rule for. Using the operator in both roles is how the table
+/// came to disagree with the policy and then to be written and never called.
+template <principal_kind Kind>
+struct plain_principal;
+
+template <>
+struct plain_principal<principal_kind::user> {
+    using type = auditor_principal;
+};
+template <>
+struct plain_principal<principal_kind::service> {
+    using type = service_principal;
+};
+template <>
+struct plain_principal<principal_kind::device> {
+    using type = sensor_principal;
+};
+
+/// One resource's column of the matrix.
+template <principal_kind Kind, resource_kind Resource, std::size_t... Actions>
+[[nodiscard]] consteval auto matrix_cell_row(std::index_sequence<Actions...>) noexcept -> bool {
+    return ((meta_auth::evaluate<app_policy, typename plain_principal<Kind>::type, Resource,
+                                 static_cast<meta_auth::action>(Actions)>()
+             == expected_decision(Kind, Resource, static_cast<meta_auth::action>(Actions)))
+            && ...);
+}
+
+/// One principal kind's row of the matrix: every resource, every action.
+template <principal_kind Kind, std::size_t... Resources>
+[[nodiscard]] consteval auto matrix_row(std::index_sequence<Resources...>) noexcept -> bool {
+    return (matrix_cell_row<Kind, static_cast<resource_kind>(Resources)>(
+                std::make_index_sequence<action_count>())
+            && ...);
+}
+
+// The whole matrix, asserted rather than described.
+//
+// `expected_decision` was written as a table and then never called: the comment
+// above the file claimed the decision matrix was checked "over every
+// combination", and what actually ran was `rule_checker`, which verifies that
+// the evaluator honours the rules it is given. That is a statement about the
+// evaluator and says nothing about the policy -- a rule that allowed one
+// principal too many satisfies it perfectly. These three assertions are the
+// missing half: 3 x 5 x 6 = 90 decisions, each compared with what the policy is
+// documented to say.
+static_assert(matrix_row<principal_kind::user>(
+    std::make_index_sequence<meta_auth::resource_kind_count>()));
+static_assert(matrix_row<principal_kind::service>(
+    std::make_index_sequence<meta_auth::resource_kind_count>()));
+static_assert(matrix_row<principal_kind::device>(
+    std::make_index_sequence<meta_auth::resource_kind_count>()));
 
 /// The enrolled credentials. `enrol` is the enrolment step; it would run on the
 /// device or in an administrative tool, and the record is what is kept.

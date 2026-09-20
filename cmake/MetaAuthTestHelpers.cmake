@@ -38,11 +38,22 @@ function(meta_auth_add_test name)
             "META_AUTH_TEST_FRAMEWORK_MAIN / META_AUTH_TEST_FRAMEWORK_DIR.")
     endif()
 
+    if(NOT ARG_TIMEOUT)
+        set(ARG_TIMEOUT 120)
+    endif()
+
     add_executable(${name} ${ARG_SOURCES} "${META_AUTH_TEST_FRAMEWORK_MAIN}")
     target_include_directories(${name} PRIVATE "${META_AUTH_TEST_FRAMEWORK_DIR}")
+    # Threads::Threads is not decoration and is not implied by the language:
+    # the concurrency tests construct std::thread, and on any platform where
+    # libpthread is a separate library (glibc before 2.34, and every Linux
+    # distribution that still supports one) the link fails without -pthread.
+    # It resolved here only because this machine's glibc merged the two, which
+    # is a property of the machine and not of the project.
     target_link_libraries(${name} PRIVATE
         meta_auth::meta_auth
         meta_auth_sanitizers
+        Threads::Threads
         ${ARG_LIBRARIES})
 
     # Tests are compiled with the project's warning set but not with
@@ -86,6 +97,14 @@ function(meta_auth_add_failure_test name)
             "'It must fail' is not a testable claim; state the expected status.")
     endif()
 
+    # `set_tests_properties(... TIMEOUT "")` is a configure error, so an
+    # omitted TIMEOUT broke the build rather than falling back to a default.
+    # A default also keeps a hanging test from hanging CI forever, which
+    # matters more than the exact number.
+    if(NOT ARG_TIMEOUT)
+        set(ARG_TIMEOUT 120)
+    endif()
+
     add_test(NAME ${name}
         COMMAND "${CMAKE_COMMAND}"
             "-DMETA_AUTH_EXPECT_PROGRAM=${ARG_PROGRAM}"
@@ -112,6 +131,21 @@ endfunction()
 function(meta_auth_add_compile_fail_test source)
     cmake_parse_arguments(ARG "" "TIMEOUT" "" ${ARGN})
 
+    if(NOT ARG_TIMEOUT)
+        set(ARG_TIMEOUT 120)
+    endif()
+
+    # The diagnostic spellings are not shared between compilers, so the driver
+    # needs to know which family it is talking to. AppleClang is clang: it is
+    # the same front end with a different version string.
+    if(MSVC)
+        set(_family "msvc")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(_family "clang")
+    else()
+        set(_family "gcc")
+    endif()
+
     get_filename_component(_name "${source}" NAME_WE)
     get_filename_component(_dir "${source}" DIRECTORY)
     set(_expectation "${_dir}/expected/${_name}.txt")
@@ -132,6 +166,7 @@ function(meta_auth_add_compile_fail_test source)
             "-DMETA_AUTH_NEGATIVE_INCLUDE_DIR=${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../include"
             "-DMETA_AUTH_NEGATIVE_CONTRACTS=${META_AUTH_COMPILER_HAS_CONTRACTS}"
             "-DMETA_AUTH_NEGATIVE_REFLECTION=${META_AUTH_COMPILER_HAS_REFLECTION}"
+            "-DMETA_AUTH_NEGATIVE_FAMILY=${_family}"
             -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/MetaAuthCompileFail.cmake")
 
     set_tests_properties(compile_fail.${_name} PROPERTIES

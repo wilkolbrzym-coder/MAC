@@ -1,0 +1,2 @@
+use of deleted function
+session_core()

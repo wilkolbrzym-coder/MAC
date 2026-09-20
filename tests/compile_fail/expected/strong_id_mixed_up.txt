@@ -1,2 +1,3 @@
-conversion from
+# Two identifiers of different kinds are different types. The diagnostic names
+# the type that could not be converted; the phrasing differs per compiler.
 strong_id

@@ -1,0 +1,3 @@
+# A proof is bound to its principal, and the rejection says so rather than
+# reporting a failed conversion between two long type names.
+gate::admit: the policy proof was issued for a different principal

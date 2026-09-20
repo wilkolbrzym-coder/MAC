@@ -1,0 +1,2 @@
+use of deleted function
+auto meta_auth::session<Principal, State>::describe_subject() const

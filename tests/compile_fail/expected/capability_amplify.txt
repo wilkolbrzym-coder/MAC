@@ -1,3 +1,2 @@
-use of deleted function
 capability::attenuate: the requested rights are not a subset of the rights held
 Authority can only be weakened, never amplified

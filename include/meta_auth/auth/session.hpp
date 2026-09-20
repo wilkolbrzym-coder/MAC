@@ -107,10 +107,23 @@ template <typename Resource>
 /// is rejected as a conflicting redeclaration. The name is the protection -- a
 /// caller who writes `detail::session_core` has written the bypass where a
 /// reviewer will see it.
-struct session_core {
-    session_id id{};
-    revocation_epoch epoch{};
-
+///
+/// Not an aggregate, and that is load-bearing. It was one -- a struct with two
+/// public members and a public `create()` -- and `session`'s constructor takes
+/// a core, so
+///
+///     session<admin_principal, session_state::elevated>{detail::session_core{}}
+///
+/// compiled, ran, and produced a fully elevated session for the administrator
+/// with no credential, no second factor and no transition. The whole state
+/// machine was bypassable by a line of code that does not look like a bypass.
+/// The constructor is private now, so `create()` is the only way to obtain a
+/// core, and the copy and move operations are written out rather than
+/// defaulted so that the type is not trivially copyable either -- otherwise
+/// `std::bit_cast` would fabricate one from raw bytes, which is the same
+/// bypass spelled differently.
+class session_core {
+public:
     /// Start a new identity. Allocates the next serial for the principal.
     template <principal_type Principal>
     [[nodiscard]] static auto create() noexcept -> session_core {
@@ -119,7 +132,55 @@ struct session_core {
                                 + 1U),
                             current_epoch<Principal>()};
     }
+
+    /// There is no way to name an empty core.
+    ///
+    /// Declared and deleted rather than merely absent, so that the program
+    /// which used to compile says why it no longer does. `session_core{}` was
+    /// a valid expression and, combined with the session constructor, an
+    /// elevated session for any principal the caller cared to name.
+    session_core() = delete(
+        "A session core cannot be created directly. A session's state is obtained from "
+        "session::begin() and reached through authenticate(), elevate() and revoke().");
+
+    session_id id{};
+    revocation_epoch epoch{};
+
+    constexpr session_core(const session_core& other) noexcept
+        : id(other.id), epoch(other.epoch) {}
+
+    constexpr auto operator=(const session_core& other) noexcept -> session_core& {
+        id = other.id;
+        epoch = other.epoch;
+        return *this;
+    }
+
+    constexpr session_core(session_core&& other) noexcept : id(other.id), epoch(other.epoch) {
+        other.id = session_id::invalid();
+        other.epoch = revocation_epoch{};
+    }
+
+    constexpr auto operator=(session_core&& other) noexcept -> session_core& {
+        id = other.id;
+        epoch = other.epoch;
+        other.id = session_id::invalid();
+        other.epoch = revocation_epoch{};
+        return *this;
+    }
+
+    ~session_core() = default;
+
+private:
+    constexpr session_core(session_id identifier, revocation_epoch started_in) noexcept
+        : id(identifier), epoch(started_in) {}
 };
+
+static_assert(!std::is_trivially_copyable_v<session_core>,
+              "a session core must not be trivially copyable: std::bit_cast would fabricate one "
+              "and re-open the bypass the private constructor closes");
+static_assert(!std::is_default_constructible_v<session_core>,
+              "a session core has no default constructor on purpose: `session_core{}` would be a "
+              "session state that was never authenticated");
 
 } // namespace detail
 
@@ -266,7 +327,13 @@ public:
     }
 
     /// Construct a state from the core a transition carried over.
-    explicit constexpr session(detail::session_core core) noexcept : core_(core) {}
+    ///
+    /// Public, and harmless now that a core can only be obtained from
+    /// `detail::session_core::create`: the parameter is a value the caller
+    /// must already hold, so this is a way to *name* an existing state, not a
+    /// way to acquire one. It was not harmless while `session_core` was an
+    /// aggregate -- see the note on that class.
+    explicit constexpr session(detail::session_core core) noexcept : core_(std::move(core)) {}
 
     session(const session&) = delete;
     auto operator=(const session&) -> session& = delete;
@@ -305,8 +372,7 @@ public:
         if (!verify_credential(enrolled, presented)) {
             return failure(auth_error::credential_rejected);
         }
-        return session<Principal, session_state::authenticated>{core_};
-    }
+        return session<Principal, session_state::authenticated>{core_};    }
 
     /// A credential record belonging to a different principal.
     ///
@@ -355,32 +421,62 @@ public:
         "Call authenticate() to obtain one.");
 
     /// any non-revoked state -> revoked.
-    [[nodiscard]] auto revoke() && noexcept -> session<Principal, session_state::revoked>
-        requires(State != session_state::revoked)
-    {
+    template <session_state S = State>
+        requires(S == State && S != session_state::revoked)
+    [[nodiscard]] auto revoke() && noexcept -> session<Principal, session_state::revoked> {
         return session<Principal, session_state::revoked>{core_};
     }
+
+    /// Revoking a revoked session.
+    ///
+    /// A deleted overload rather than a mere absence: without it the rejection
+    /// is "no matching function for call to 'revoke()'", which is true and
+    /// unhelpful. Every other illegal transition in this class carries a
+    /// sentence, and this one did not.
+    template <session_state S = State>
+        requires(S == State && S == session_state::revoked)
+    auto revoke() && noexcept = delete(
+        "session::revoke: this session is already revoked. Revocation is terminal, and a second "
+        "revocation is not a no-op -- it is a program that has lost track of its own state.");
 
     // -- operations that require a state ------------------------------------
 
     /// An operation that only an authenticated session may perform.
-    [[nodiscard]] constexpr auto describe_subject() const noexcept -> std::string_view
-        requires(State == session_state::authenticated || State == session_state::elevated)
-    {
+    template <session_state S = State>
+        requires(S == State && is_proven(S))
+    [[nodiscard]] constexpr auto describe_subject() const noexcept -> std::string_view {
         return principal_name<Principal>();
     }
+
+    /// The same operation from a state that has proven nothing.
+    ///
+    /// A constrained member that simply does not exist would reject the call
+    /// correctly and explain nothing; the deleted twin is what turns the
+    /// rejection into a sentence naming the transition that is missing.
+    template <session_state S = State>
+        requires(S == State && !is_proven(S))
+    constexpr auto describe_subject() const noexcept = delete(
+        "session::describe_subject: this session has not proven a credential, so it does not "
+        "know which principal it is for. Call authenticate() to obtain a session that does.");
 
     /// An operation that only an elevated session may perform. Named for what
     /// it stands for rather than for what it does: the point of the type-state
     /// is that this call is unreachable from an authenticated session.
-    [[nodiscard]] constexpr auto require_second_factor() const noexcept -> bool
-        requires(State == session_state::elevated)
-    {
+    template <session_state S = State>
+        requires(S == State && S == session_state::elevated)
+    [[nodiscard]] constexpr auto require_second_factor() const noexcept -> bool {
         return true;
     }
 
+    /// The same operation without a second factor.
+    template <session_state S = State>
+        requires(S == State && S != session_state::elevated)
+    constexpr auto require_second_factor() const noexcept = delete(
+        "session::require_second_factor: this session has not presented a second factor, so the "
+        "operation it guards is unreachable. Call elevate() to obtain an elevated session.");
+
 private:
-    detail::session_core core_{};
+    detail::session_core core_;
 };
 
 // The positive half of the state machine, asserted here: in each state, the

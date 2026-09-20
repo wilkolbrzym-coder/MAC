@@ -25,11 +25,14 @@ set(_negative_sources
     capability_construct.cpp
     capability_delegate_beyond_held.cpp
     capability_delegate_without_grant.cpp
+    gate_proof_for_another_principal.cpp
+    policy_bare_principal_rule.cpp
     policy_denied_request.cpp
     policy_missing_rule.cpp
     protected_object_direct_access.cpp
     session_credential_of_another_principal.cpp
     session_elevate_without_authenticating.cpp
+    session_forged_state.cpp
     session_operate_after_revocation.cpp
     session_revoke_twice.cpp
     strong_id_mixed_up.cpp)

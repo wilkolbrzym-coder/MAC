@@ -1,1 +1,4 @@
-is private within this context
+# The value of a protected object is reachable only through the gate. Every
+# compiler spells the rejection of a private member access with the word
+# "private"; the sentence around it is in the family file.
+private

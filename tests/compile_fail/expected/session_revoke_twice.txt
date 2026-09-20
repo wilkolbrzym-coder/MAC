@@ -1,2 +1,3 @@
-no matching function for call to
-revoke
+# Revocation is terminal, and the second attempt is rejected by name.
+session::revoke: this session is already revoked
+!no matching function

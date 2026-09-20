@@ -1,0 +1,2 @@
+use of deleted function
+capability(const meta_auth::capability<Resource, Rights>&)

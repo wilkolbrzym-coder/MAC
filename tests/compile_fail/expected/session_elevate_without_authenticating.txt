@@ -1,3 +1,2 @@
-use of deleted function
 a second factor requires an authenticated session first
 Call authenticate

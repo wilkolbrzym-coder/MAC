@@ -1,3 +1,7 @@
-use of deleted function
-capability
-!cannot be copied
+# The message belongs to this library, so every compiler reproduces it
+# verbatim. What differs is how each compiler announces a deleted function,
+# and that is in capability_copy.<family>.txt.
+A capability cannot be copied. Authority is handed on with delegate
+# A rejection saying "no matching function" would mean the deleted overload
+# was never selected -- a different defect, and not evidence for this one.
+!no matching function

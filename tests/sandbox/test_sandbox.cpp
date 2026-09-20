@@ -77,13 +77,13 @@ using device_gate = gate<resource_kind::devices>;
 /// A proof that the policy allows an operation. A free function because the
 /// `consteval` call has to happen in a constant expression.
 [[nodiscard]] consteval auto proof_for_observe() noexcept
-    -> authorization<resource_kind::devices, action::observe> {
+    -> authorization<resource_kind::devices, action::observe, admin_principal> {
     return meta_auth::authorize<sandbox_policy, admin_principal, resource_kind::devices,
                                 action::observe>();
 }
 
 [[nodiscard]] consteval auto proof_for_modify() noexcept
-    -> authorization<resource_kind::devices, action::modify> {
+    -> authorization<resource_kind::devices, action::modify, admin_principal> {
     return meta_auth::authorize<sandbox_policy, admin_principal, resource_kind::devices,
                                 action::modify>();
 }
@@ -110,9 +110,9 @@ static_assert(meta_auth::to_string(resource_kind::policy_store)
 
 /// A proof carries the request it proves, so a gate can be handed one for a
 /// different resource and reject it at compile time.
-static_assert(authorization<resource_kind::devices, action::observe>::resource
+static_assert(authorization<resource_kind::devices, action::observe, admin_principal>::resource
               == resource_kind::devices);
-static_assert(authorization<resource_kind::devices, action::observe>::action_value
+static_assert(authorization<resource_kind::devices, action::observe, admin_principal>::action_value
               == action::observe);
 
 // ---------------------------------------------------------------------------
@@ -281,6 +281,41 @@ META_AUTH_TEST("gate", "a_sufficient_capability_is_admitted_and_recorded") {
     META_AUTH_CHECK_EQ(record->resource_hash,
                        meta_auth::resource_for_t<resource_kind::devices>::identifier());
     META_AUTH_CHECK_EQ(record->rights_bits, read_write.bits());
+}
+
+META_AUTH_TEST("gate", "a_neutralised_capability_is_refused_and_recorded") {
+    // A capability that has been moved from or consumed by `attenuate` is still
+    // a well-formed object, so the gate has to refuse it explicitly rather than
+    // reading the fields it happens to carry. The outcome is its own value:
+    // "this token has already been spent" is a defect in the caller, and an
+    // operator reading the trail should not have to infer it from a missing
+    // right.
+    audit_trail trail;
+    device_gate mediator{trail};
+    auto capability_value = device_authority().mint<read_write>();
+    auto spent = std::move(capability_value).attenuate<read_only>();
+
+    // The template argument is `read_write` and not `read_only`, because
+    // attenuation does not change the *type* of the value it consumes: the
+    // spent object still names the rights it was minted with. That is exactly
+    // why the check has to be on the value -- `Rights` is a compile-time
+    // constant and cannot be revised when the authority is given away.
+    const auto outcome = mediator.admit<action::observe, read_write, admin_principal>(
+        capability_value, proof_for_observe());
+    META_AUTH_REQUIRE(!outcome.has_value());
+    META_AUTH_CHECK_EQ(outcome.error(), meta_auth::auth_error::capability_neutralised);
+
+    const auto record = trail.last();
+    META_AUTH_REQUIRE(record.has_value());
+    META_AUTH_CHECK_EQ(record->outcome, audit_outcome::denied_neutralised);
+    META_AUTH_CHECK(meta_auth::is_denial(record->outcome));
+
+    // The capability that received the authority is admitted, which is what
+    // makes the refusal above a statement about the spent value and not about
+    // attenuation having broken something.
+    const auto admitted = mediator.admit<action::observe, read_only, admin_principal>(
+        spent, proof_for_observe());
+    META_AUTH_CHECK(admitted.has_value());
 }
 
 META_AUTH_TEST("gate", "a_capability_without_the_right_is_refused_and_recorded") {

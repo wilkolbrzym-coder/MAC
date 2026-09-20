@@ -1,2 +1,4 @@
-no matching function for call to
-describe_subject
+# A revoked session cannot act on its principal, and the rejection names the
+# transition that is missing instead of listing candidates.
+session::describe_subject: this session has not proven a credential
+!no matching function
