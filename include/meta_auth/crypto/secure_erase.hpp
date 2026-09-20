@@ -77,8 +77,32 @@ public:
 
     secret_buffer(const secret_buffer&) = delete;
     auto operator=(const secret_buffer&) -> secret_buffer& = delete;
-    secret_buffer(secret_buffer&&) = delete;
-    auto operator=(secret_buffer&&) -> secret_buffer& = delete;
+
+    /// Movable, and the move erases the source.
+    ///
+    /// A deleted move would make it impossible to return a secret from a
+    /// factory function -- a normal thing to do -- without forcing callers
+    /// into out-parameters. Transferring and wiping is what a move of a secret
+    /// *means*: exactly one object holds the value afterwards, and the other
+    /// holds nothing rather than a stale copy the destructor will not reach.
+    secret_buffer(secret_buffer&& other) noexcept : size_(other.size_) {
+        for (std::size_t index = 0; index < size_; ++index) {
+            storage_[index] = other.storage_[index];
+        }
+        other.wipe();
+    }
+
+    auto operator=(secret_buffer&& other) noexcept -> secret_buffer& {
+        if (this != &other) {
+            wipe();
+            size_ = other.size_;
+            for (std::size_t index = 0; index < size_; ++index) {
+                storage_[index] = other.storage_[index];
+            }
+            other.wipe();
+        }
+        return *this;
+    }
 
     /// A constexpr destructor that erases only at run time.
     ///

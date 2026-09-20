@@ -76,18 +76,47 @@ private:
     Rep value_ = invalid_value;
 };
 
+namespace detail {
+
+/// The fallback name of a tag: reflection when the build has it, so that a
+/// failure report says "device_tag#7" rather than "strong_id#7", which is the
+/// difference between a report that identifies the value and one that
+/// identifies only the type.
+template <typename Tag>
+[[nodiscard]] consteval auto reflected_tag_name() noexcept -> std::string_view {
+#if META_AUTH_HAS_REFLECTION
+    return std::meta::has_identifier(^^Tag) ? std::meta::identifier_of(^^Tag)
+                                            : std::meta::display_string_of(^^Tag);
+#else
+    return "id";
+#endif
+}
+
+/// Resolve a tag's name.
+///
+/// `if constexpr` rather than a ternary: a tag that does not override the name
+/// is often an incomplete type, and the false branch of a ternary is still
+/// instantiated, which turns "this tag has no name of its own" into an error
+/// about an incomplete type.
+template <typename Tag>
+[[nodiscard]] consteval auto resolved_tag_name() noexcept -> std::string_view {
+    if constexpr (requires { Tag::tag_name; }) {
+        return std::string_view{Tag::tag_name};
+    } else {
+        return reflected_tag_name<Tag>();
+    }
+}
+
+} // namespace detail
+
 /// The name of an identifier's tag, for diagnostics.
 ///
-/// Uses reflection when the build has it, so that a failure report says
-/// "device_id#7" instead of "strong_id#7" -- which is the difference between a
-/// report that identifies the value and one that identifies the type.
-#if META_AUTH_HAS_REFLECTION
+/// A tag may override it by declaring `static constexpr std::string_view
+/// tag_name`, which is how a tag parameterised by a name -- a principal, a
+/// resource -- renders as the name it stands for rather than as the name of
+/// the template that produced it.
 template <typename Tag>
-inline constexpr std::string_view tag_name = std::meta::identifier_of(^^Tag);
-#else
-template <typename Tag>
-inline constexpr std::string_view tag_name = "id";
-#endif
+inline constexpr std::string_view tag_name = detail::resolved_tag_name<Tag>();
 
 } // namespace meta_auth
 
