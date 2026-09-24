@@ -190,6 +190,19 @@ the library's health as unknown while looking like a verdict on it.
   write path, not to this workflow, and the bound it corrects was prose that the
   test disproved.
 
+* **The macOS job then failed one step further in**, on `__COUNTER__`: Homebrew
+  LLVM is version 23, which reports the macro as a C2y extension under
+  `-Wpedantic` — and the test framework used it to give each case a unique name.
+  It uses `__LINE__` now, which is in the standard and unique per declaration
+  site for the same reason. `__COUNTER__` is a common extension that C2y
+  standardised for C, not for C++, so the diagnostic is correct and will spread
+  rather than regress.
+* **Every test target pinned `CXX_STANDARD 26` as well**, so the MSVC fix to the
+  library target was not enough: the Windows job then reported the same
+  "requires the language dialect CXX26" for each of them. The pin is for every
+  compiler that can hear it; MSVC takes the mode from the library's interface
+  requirement.
+
 * **MSVC could not configure at all**, and the cause was CMake's: CMake has no
   CXX26 dialect for MSVC (its module stops at CXX23, which MSVC spells
   `/std:c++latest`), so `CMAKE_CXX_STANDARD 26` made every `try_compile` in the

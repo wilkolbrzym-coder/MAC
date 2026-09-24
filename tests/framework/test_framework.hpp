@@ -452,15 +452,25 @@ struct registrar {
 // ---------------------------------------------------------------------------
 // Named test cases
 //
-// `__COUNTER__` is captured once, in the argument list of the helper, and the
-// resulting number is substituted into all three generated names. That is what
-// makes two cases with the same name in one translation unit a duplicate
-// *runtime* entry, which the runner reports, rather than a redefinition error.
+// A number is captured once, in the argument list of the helper, and
+// substituted into all three generated names. That is what makes two cases
+// with the same name in one translation unit a duplicate *runtime* entry,
+// which the runner reports, rather than a redefinition error.
+//
+// The number is `__LINE__`, and it used to be `__COUNTER__`. Both are unique
+// per declaration site; `__COUNTER__` is the one that is not in the standard,
+// and C2y standardised it for C rather than C++, so Clang 23 reports it under
+// `-Wpedantic` -- "`__COUNTER__` is a C2y extension" -- and this project builds
+// with warnings as errors. That is how the macOS job found it, on a compiler
+// whose Homebrew formula tracks upstream rather than a release. `__LINE__` is
+// standard, and the property that matters is unchanged: one declaration per
+// line here, and two on one line would be a redefinition the compiler reports
+// rather than a case that silently never runs.
 // ---------------------------------------------------------------------------
 #define META_AUTH_TEST_CONCAT_IMPL(a, b) a##b
 #define META_AUTH_TEST_CONCAT(a, b) META_AUTH_TEST_CONCAT_IMPL(a, b)
 
-#define META_AUTH_TEST(suite_name, case_name) META_AUTH_TEST_IMPL(suite_name, case_name, __COUNTER__)
+#define META_AUTH_TEST(suite_name, case_name) META_AUTH_TEST_IMPL(suite_name, case_name, __LINE__)
 
 #define META_AUTH_TEST_IMPL(suite_name, case_name, id)                                 \
     static void META_AUTH_TEST_CONCAT(meta_auth_case_, id)();                          \

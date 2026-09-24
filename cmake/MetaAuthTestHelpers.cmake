@@ -60,10 +60,21 @@ function(meta_auth_add_test name)
     # -Werror-by-default on other toolchains; the library target already
     # publishes the warnings, this only adds the test-specific clamp.
     set_target_properties(${name} PROPERTIES
-        CXX_STANDARD 26
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+    # The dialect is pinned here as well as on the library, in the spelling this
+    # compiler can hear: CMake has no CXX26 mapping for MSVC, so
+    # `CXX_STANDARD 26` makes generation fail there -- "requires the language
+    # dialect CXX26 ... CMake does not know the flags to enable it" -- which is
+    # what the Windows job reported for every test target. On MSVC the mode
+    # arrives through `meta_auth`, which publishes `/std:c++latest` as an
+    # interface requirement.
+    if(NOT MSVC)
+        set_target_properties(${name} PROPERTIES
+            CXX_STANDARD 26
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF)
+    endif()
 
     add_test(NAME ${name} COMMAND ${name})
     set_tests_properties(${name} PROPERTIES

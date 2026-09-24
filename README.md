@@ -176,7 +176,7 @@ Contracts and static reflection are *optional* and are probed:
 | reference | GCC 16 | yes | yes | `ctest --preset dev-gcc16`, green |
 | portable | GCC 15 | no | no | `ctest` on GCC 15, green |
 | portable | Clang 19 and 21 | no | no | `ctest` here on both; CI job `linux/clang` (21), green |
-| portable | AppleClang (Homebrew LLVM) | no | no | CI job `macos/portable` — no green run yet |
+| portable | Homebrew LLVM (23 today) | no | no | CI job `macos/portable` — no green run yet |
 | portable | MSVC 19.40+ | no | no | CI job `windows/msvc` — no green run yet |
 
 "Verified" means a green run on the machine this was written on, or in CI where

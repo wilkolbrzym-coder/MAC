@@ -213,10 +213,13 @@ to assume it misses nothing.
   where clang reports the flag as unused — a *warning*, which a probe reading
   exit status takes for acceptance, and which the probe never even compiled
   because every flag shared one result variable and CMake skips a probe whose
-  result is already defined; and MSVC stopped in CMake, which has no CXX26
-  dialect for MSVC. Both are fixed in this tree and unverified on the machines
-  they concern, which is what those jobs are for. Until they run green,
-  "portable" on macOS and Windows means "portable by construction", not
+  result is already defined; MSVC stopped in CMake, which has no CXX26 dialect
+  for MSVC; and then the macOS job reached the sources, where Homebrew's LLVM —
+  version 23 today, tracking upstream rather than a release — reports the test
+  framework's `__COUNTER__` as a C2y extension under `-Wpedantic`, which the
+  framework now spells `__LINE__`. Each is fixed in this tree and unverified on
+  the machine it concerns, which is what those jobs are for. Until they run
+  green, "portable" on macOS and Windows means "portable by construction", not
   "portable as measured".
 * **The audit trail can lose a record, not merely overwrite one.** The bound
   used to be stated as "up to `capacity` concurrent writers", on the reasoning
