@@ -28,9 +28,25 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # The C++26 dialect is a hard requirement: the library is built on contracts,
 # deleted functions with diagnostics, pack indexing and reflection. The
 # *optional* members of that set are detected below and degrade gracefully.
-set(CMAKE_CXX_STANDARD 26)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+#
+# MSVC is spelled separately, and the reason is CMake's rather than the
+# compiler's. CMake has no CXX26 mapping for MSVC -- its module stops at CXX23,
+# which MSVC spells `/std:c++latest` -- so `CMAKE_CXX_STANDARD 26` makes CMake
+# refuse to generate: every `try_compile` in this build died with "requires the
+# language dialect CXX26 ... CMake does not know the flags to enable it", the
+# hardening probe being the first one reached. MSVC has the mode; the build
+# system has no name for it. The mode is requested the way the compiler spells
+# it, on the target below, so that the probes configure at all and a consumer of
+# the package compiles in the mode the library was built in. `/Zc:__cplusplus`
+# is what keeps `__cplusplus` honest under it, which is why that flag is in the
+# MSVC warning set.
+if(MSVC)
+    set(META_AUTH_CXX_MODE /std:c++latest)
+else()
+    set(CMAKE_CXX_STANDARD 26)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -61,7 +77,16 @@ target_include_directories(meta_auth INTERFACE
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-target_compile_features(meta_auth INTERFACE cxx_std_26)
+# The dialect travels with the target on MSVC and as a compile feature
+# everywhere else, which is the same requirement said in the two ways the two
+# build systems can hear it. It is published as an INTERFACE requirement, not
+# as a build-only one: a consumer compiled in another mode would lose the
+# guarantees this library sells.
+if(MSVC)
+    target_compile_options(meta_auth INTERFACE "${META_AUTH_CXX_MODE}")
+else()
+    target_compile_features(meta_auth INTERFACE cxx_std_26)
+endif()
 
 meta_auth_configure_dialect(meta_auth)
 meta_auth_configure_warnings(meta_auth)

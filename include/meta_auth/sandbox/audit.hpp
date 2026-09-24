@@ -23,15 +23,31 @@
 //      from detecting two writers in one slot -- and the reader of this comment
 //      should know which one is guaranteed. The protocol is a seqlock, and a
 //      seqlock assumes a single writer per slot. Here the slot is chosen as
-//      `sequence & (capacity - 1)`, so two writers collide only when their
-//      sequence numbers differ by exactly `capacity` -- 256. That requires 256
-//      appends to be in flight at once, which is far beyond the concurrency
-//      this library is used at (the benchmark and the tests run one writer per
-//      thread, dozens of threads). The guarantee is therefore stated with its
-//      bound: **up to `capacity` concurrent writers, a reader never returns a
-//      mixture of two records.** Beyond that the bound is not claimed, and the
-//      fix would be per-slot mutual exclusion, which the "never blocks"
-//      requirement above rules out.
+//      `sequence & (capacity - 1)`, so two writers share a slot exactly when
+//      their sequence numbers differ by `capacity` -- 256.
+//
+//      That is *not* the same as requiring 256 writers in flight, which is what
+//      this comment claimed before the ASan job disproved it. What it requires
+//      is one writer to be *stalled* while 256 later appends take its slot: the
+//      stalled writer returns, its stamp and fields land on top of a newer
+//      record, and a reader then sees a stamp matching neither sequence and
+//      skips that record. The record is not torn -- the seqlock holds and the
+//      mixture is never returned -- but it is *missing*, and `dropped()` does
+//      not count it, because the overflow that counter tracks happened when the
+//      overwritten record was written, not when it was lost.
+//
+//      That mechanism is the one most consistent with the failure, not a
+//      measured one: `sandbox.concurrent_records_all_land` failed in the first
+//      ASan run (a gap where a retained record should have been -- sequences
+//      1419 and 1421 adjacent, 1420 absent, out of 1600 appends from eight
+//      writers on four cores), and twelve runs of that case under ASan on the
+//      machine this was written on did not reproduce it. The bound is therefore
+//      stated as the code actually behaves rather than as intended: **a reader
+//      never returns a mixture of two records, and a record can be lost -- not
+//      merely overwritten -- when a writer stalls by `capacity` appends.**
+//      Closing that needs the slot to be claimed rather than inferred from the
+//      sequence (a per-slot owner word taken with a compare-exchange), which
+//      changes the write path; it is not done here.
 //    * **A record must not dangle.** Names are stored as their 64-bit hashes
 //      rather than as views, so a record stays valid after the string it came
 //      from is gone. Rendering resolves a hash through the principal and

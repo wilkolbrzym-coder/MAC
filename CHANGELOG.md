@@ -172,13 +172,31 @@ the library's health as unknown while looking like a verdict on it.
   failed in `project()` with "could not find any instance of Visual Studio"
   before compiling a line. The generator is no longer pinned: the job is
   testing MSVC, not a release of MSVC.
-* **The macOS job failed on a flag the probe had accepted.** Apple's clang
-  reports an unimplemented `-fstack-clash-protection` for arm64 as a warning
-  ("argument unused during compilation"), so a probe that reads only the exit
-  status said yes and the build then failed under `-Werror` with the flag in
-  place. The probe now promotes diagnostics to errors for the duration of its
-  own run — the question is whether the compiler accepts the flag *silently*,
-  because that is what the build does with it.
+* **The macOS job failed on a flag the probe had accepted, twice over.** Apple's
+  clang reports an unimplemented `-fstack-clash-protection` for arm64 as a
+  warning ("argument unused during compilation"), so a probe that reads only the
+  exit status said yes and the build then failed under `-Werror` with the flag in
+  place. The probe now promotes diagnostics to errors for the duration of its own
+  run — the question is whether the compiler accepts the flag *silently*, because
+  that is what the build does with it. That alone did not fix the job, because
+  both flag helpers passed the *same result variable* for every flag and CMake
+  skips a probe whose result is already defined: only the first flag,
+  `-fstack-protector-strong`, which every compiler accepts, was ever compiled,
+  and the rest inherited its verdict. Each flag is now probed under its own name.
+* **The ASan job ran for the first time and immediately found something**, which
+  is the point of it: `sandbox.concurrent_records_all_land` failed with a
+  retained record missing from the snapshot. Recorded in `docs/testing.md` and in
+  `sandbox/audit.hpp` rather than fixed here — the fix is to the audit trail's
+  write path, not to this workflow, and the bound it corrects was prose that the
+  test disproved.
+
+* **MSVC could not configure at all**, and the cause was CMake's: CMake has no
+  CXX26 dialect for MSVC (its module stops at CXX23, which MSVC spells
+  `/std:c++latest`), so `CMAKE_CXX_STANDARD 26` made every `try_compile` in the
+  build fail with "requires the language dialect CXX26 … CMake does not know the
+  flags to enable it" — the hardening probe being the first one reached. The
+  mode is requested the way the compiler spells it, on the target, and travels
+  to consumers as an interface requirement.
 
 ### Changed
 

@@ -175,15 +175,16 @@ Contracts and static reflection are *optional* and are probed:
 | --- | --- | --- | --- | --- |
 | reference | GCC 16 | yes | yes | `ctest --preset dev-gcc16`, green |
 | portable | GCC 15 | no | no | `ctest` on GCC 15, green |
-| portable | Clang 19 and 21 | no | no | `ctest` on both, green; CI job `linux/clang` (21) |
+| portable | Clang 19 and 21 | no | no | `ctest` here on both; CI job `linux/clang` (21), green |
 | portable | AppleClang (Homebrew LLVM) | no | no | CI job `macos/portable` — no green run yet |
 | portable | MSVC 19.40+ | no | no | CI job `windows/msvc` — no green run yet |
 
 "Verified" means a green run on the machine this was written on, or in CI where
-the row says so. GCC 15, GCC 16, Clang 19 and Clang 21 have been run here;
-AppleClang and MSVC have not — neither compiler is installed — so those two rows
-are the CI jobs' to earn, and neither job has gone green yet. `docs/testing.md`
-lists that among the known gaps rather than burying it.
+the row says so. GCC 15, GCC 16, Clang 19 and Clang 21 have been run here, and
+the `linux/clang` job is green; AppleClang and MSVC have not — neither compiler
+is installed here — so those two rows are the CI jobs' to earn, and neither job
+has gone green yet. `docs/testing.md` lists that among the known gaps rather
+than burying it.
 
 Presets: `dev`, `portable` (no contracts, no reflection), `release`, `asan`,
 `tsan`, `coverage`, `bench`, `dev-gcc16`, `portable-gcc16`, `dev-clang`,

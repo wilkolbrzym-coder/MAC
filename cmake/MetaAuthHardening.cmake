@@ -49,22 +49,39 @@ function(meta_auth_promote_diagnostics)
     endif()
 endfunction()
 
+# Every flag is probed under its own result variable, and that is not
+# decoration either. CMake's probe is *skipped* when its result variable is
+# already defined, and both helpers below used to pass the same name for every
+# flag: only the first one -- `-fstack-protector-strong`, which every compiler
+# accepts -- was ever compiled, and each later flag inherited its verdict
+# without being asked about. The compiler said `-fstack-clash-protection` was
+# unused for arm64 darwin, the probe said the flag was fine, and the build
+# failed under `-Werror`. Promoting the probe's diagnostics (above) did not fix
+# that on its own; the cached answer was the actual reason the macOS job stayed
+# red. The name is derived from the flag so that two flags cannot collide.
+function(meta_auth_probe_variable flag out_var)
+    string(MAKE_C_IDENTIFIER "${flag}" _meta_auth_flag_id)
+    set(${out_var} "META_AUTH_ACCEPTS_${_meta_auth_flag_id}" PARENT_SCOPE)
+endfunction()
+
 function(meta_auth_enable_compile_flag target flag)
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_QUIET ON)
     meta_auth_promote_diagnostics()
-    check_cxx_compiler_flag("${flag}" _meta_auth_supports)
+    meta_auth_probe_variable("${flag}" _meta_auth_probe)
+    check_cxx_compiler_flag("${flag}" "${_meta_auth_probe}")
     cmake_pop_check_state()
-    if(_meta_auth_supports)
+    if(${_meta_auth_probe})
         target_compile_options(${target} INTERFACE "${flag}")
     endif()
 endfunction()
 
 function(meta_auth_enable_link_flag target flag)
     cmake_push_check_state(RESET)
-    check_linker_flag(CXX "${flag}" _meta_auth_supports)
+    meta_auth_probe_variable("${flag}" _meta_auth_probe)
+    check_linker_flag(CXX "${flag}" "${_meta_auth_probe}")
     cmake_pop_check_state()
-    if(_meta_auth_supports)
+    if(${_meta_auth_probe})
         target_link_options(${target} INTERFACE "${flag}")
     endif()
 endfunction()

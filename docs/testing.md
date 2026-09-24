@@ -207,18 +207,30 @@ to assume it misses nothing.
   `-Werror=noexcept` defects were found. Clang 19 is the floor the README
   states, so that floor is now measured rather than argued; Clang 21 is what CI
   builds. AppleClang and MSVC are covered by the `macos/portable` (Homebrew
-  LLVM, because Apple's clang predates P2573) and `windows/msvc` jobs, and
-  neither has produced a green run yet — their first runs failed for reasons
-  that were about the jobs rather than the library (a hardening flag the probe
-  mis-accepted for arm64 darwin, and a pinned Visual Studio instance the runner
-  image no longer carries), which are fixed but unverified. Until those jobs run
-  green, "portable" on macOS and Windows means "portable by construction", not
+  LLVM, because Apple's clang predates P2573) and `windows/msvc` jobs. Neither
+  has produced a green run yet, and neither failure has been about the library:
+  the hardening probe accepted `-fstack-clash-protection` for arm64 darwin,
+  where clang reports the flag as unused — a *warning*, which a probe reading
+  exit status takes for acceptance, and which the probe never even compiled
+  because every flag shared one result variable and CMake skips a probe whose
+  result is already defined; and MSVC stopped in CMake, which has no CXX26
+  dialect for MSVC. Both are fixed in this tree and unverified on the machines
+  they concern, which is what those jobs are for. Until they run green,
+  "portable" on macOS and Windows means "portable by construction", not
   "portable as measured".
-* **The audit trail's seqlock bounds the number of concurrent writers.** Up to
-  `capacity` (256) writers sharing a slot is impossible; beyond that the
-  protocol assumes a single writer per slot and a reader could accept a mixed
-  record. The bound is stated in `sandbox/audit.hpp` next to the claim, and the
-  tests exercise dozens of threads, not hundreds.
+* **The audit trail can lose a record, not merely overwrite one.** The bound
+  used to be stated as "up to `capacity` concurrent writers", on the reasoning
+  that two writers share a slot only when their sequences differ by 256, which
+  would need 256 appends in flight. That reasoning is wrong: what it takes is
+  one writer *stalled* by 256 appends, whose late write lands on a newer
+  record's slot and leaves a stamp matching neither sequence, so a reader skips
+  it. `sandbox.concurrent_records_all_land` failed that way in the first ASan
+  run (sequences 1419 and 1421 adjacent, 1420 absent, of 1600 appends), and
+  twelve local runs did not reproduce it, so the mechanism is the explanation
+  most consistent with the failure rather than a measured one. `dropped()` does
+  not count such a loss. `sandbox/audit.hpp` states the bound as the code
+  behaves; closing it needs the slot to be claimed with a compare-exchange
+  rather than inferred from the sequence.
 * **Revocation is not transactional with the operation it revokes.** A
   revocation that lands between `admit` returning and the operation being
   performed is not observed by that operation, so a capability can be used once
