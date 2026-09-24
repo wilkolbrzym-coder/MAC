@@ -216,9 +216,6 @@ inline const credential_record<operator_principal> operator_credential =
 inline const second_factor<operator_principal> operator_mfa =
     second_factor<operator_principal>::enrol(operator_second_factor);
 
-inline const credential_record<admin_principal> admin_credential =
-    credential_record<admin_principal>::enrol("admin-passphrase");
-
 } // namespace
 
 // ---------------------------------------------------------------------------

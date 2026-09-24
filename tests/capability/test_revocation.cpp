@@ -190,7 +190,7 @@ META_AUTH_TEST("revocation", "concurrent_revocations_all_take_effect") {
     workers.reserve(thread_count);
 
     for (int index = 0; index < thread_count; ++index) {
-        workers.emplace_back([&ready, &start] {
+        workers.emplace_back([&ready] {
             ready.fetch_add(1, std::memory_order_release);
             while (ready.load(std::memory_order_acquire) < thread_count) {
                 std::this_thread::yield();

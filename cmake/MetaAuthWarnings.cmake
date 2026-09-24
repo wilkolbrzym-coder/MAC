@@ -155,7 +155,16 @@ set(META_AUTH_WARNINGS_CLANG
     -Wvla
     -Wdouble-promotion
     -Wswitch-enum
-    -Wunreachable-code
+    # `-Wunreachable-code` is deliberately absent, and Clang 21 is why. The
+    # diagnostic is a source-level heuristic rather than a data-flow result
+    # (Clang's own documentation says it is not intended for production use),
+    # and it fires on the dialect report: `META_AUTH_HAS_CONTRACTS ? "enforced"
+    # : "disabled"` is a constant condition, so the arm that is not taken is
+    # reported as "code will never be executed" -- in a line whose whole
+    # purpose is to print which arm was taken. The warning that would have
+    # caught the dead `rights_set delegating` fixture did not pay for a build
+    # that cannot be produced; `-Wunused-const-variable` and
+    # `-Wunused-lambda-capture`, which are data-flow facts, did catch it.
     -Wconditional-uninitialized
     -Wcomma
     -Wdocumentation

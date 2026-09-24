@@ -19,13 +19,12 @@
     {
       "name": "base-msvc",
       "hidden": true,
-      "description": "The Visual Studio generator, which needs no developer command prompt and is multi-config, so a build type is chosen at build time rather than at configure time.",
+      "description": "The Visual Studio generator, which needs no developer command prompt and is multi-config, so a build type is chosen at build time rather than at configure time. The generator is not pinned: CMake picks the newest Visual Studio it can find, and a pinned year turns a runner image update into 'could not find any instance of Visual Studio' -- which is exactly how this preset failed the first time it ran in CI.",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "META_AUTH_WARNINGS_AS_ERRORS": "ON"
       },
-      "generator": "Visual Studio 17 2022",
       "architecture": {
         "value": "x64",
         "strategy": "set"
@@ -178,7 +177,7 @@
 
     {
       "name": "windows-msvc",
-      "displayName": "Windows, Visual Studio 2022 (x64)",
+      "displayName": "Windows, MSVC through the newest Visual Studio (x64)",
       "description": "For a Windows machine without Ninja or a developer command prompt. Multi-config: pick Debug or Release with --config on the build and test commands. Contracts and static reflection are GCC features today, so this configuration runs with the portable fallbacks -- which is the point of it.",
       "inherits": "base-msvc",
       "cacheVariables": {

@@ -200,14 +200,20 @@ to assume it misses nothing.
 * **`-fno-exceptions` is not exercised.** The library throws nothing, so it
   should compile with exceptions disabled, and no preset proves it. The claim is
   therefore not made in `SECURITY.md`.
-* **Clang, AppleClang and MSVC have not been run on the machine this was
-  developed on.** GCC 15 and GCC 16 have: `ctest --preset dev` and
-  `--preset dev-gcc16` are green on both, and GCC 15 was the configuration in
-  which the `fixed_string::contains` and `-Werror=noexcept` defects were found.
-  The other compilers are covered by CI jobs — `linux/clang`, `macos/portable`
-  (Homebrew LLVM, because Apple's clang predates P2573) and `windows/msvc` — and
-  until those have run, "portable" means "portable by construction and by CI",
-  not "portable as measured here".
+* **AppleClang and MSVC have not been run on the machine this was developed
+  on.** GCC 15, GCC 16, Clang 19 and Clang 21 have: `ctest` is green on all
+  four in the portable configuration, 43/43, negative suite included, and GCC 15
+  was the configuration in which the `fixed_string::contains` and
+  `-Werror=noexcept` defects were found. Clang 19 is the floor the README
+  states, so that floor is now measured rather than argued; Clang 21 is what CI
+  builds. AppleClang and MSVC are covered by the `macos/portable` (Homebrew
+  LLVM, because Apple's clang predates P2573) and `windows/msvc` jobs, and
+  neither has produced a green run yet — their first runs failed for reasons
+  that were about the jobs rather than the library (a hardening flag the probe
+  mis-accepted for arm64 darwin, and a pinned Visual Studio instance the runner
+  image no longer carries), which are fixed but unverified. Until those jobs run
+  green, "portable" on macOS and Windows means "portable by construction", not
+  "portable as measured".
 * **The audit trail's seqlock bounds the number of concurrent writers.** Up to
   `capacity` (256) writers sharing a slot is impossible; beyond that the
   protocol assumes a single writer per slot and a reader could accept a mixed
@@ -230,10 +236,12 @@ to assume it misses nothing.
   the linker accepts them; nothing asserts that the resulting binary has a
   non-executable stack and full RELRO. `checksec`-style verification would need
   a dependency.
-* **No cross-compiler run.** GCC 15, GCC 16 and Clang 21 are claimed in the
-  README; only GCC 16 is installed in CI, because the reference configuration is
-  the one the guarantees are stated for. The portable preset exercises the
-  feature-detection paths, not the compilers.
+* **The compiler matrix covers the floors unevenly.** CI installs GCC 15, GCC 16
+  and Clang 21 — the reference container's own compilers — so Clang's stated
+  floor (19) is not what CI measures; it is measured on the machine this was
+  developed on instead. MSVC's floor (19.40) is the one that has only been
+  argued: the job runs whatever the runner image ships, and nothing asserts the
+  version it found.
 * **The audit trail's capacity is not tuned.** 256 records is a number that
   makes the ring testable and the dump readable; what it should be in a
   deployment with a given event rate is a question this project has not

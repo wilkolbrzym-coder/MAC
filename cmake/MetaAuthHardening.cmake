@@ -24,9 +24,35 @@ include(CheckCXXCompilerFlag)
 include(CheckLinkerFlag)
 include(CMakePushCheckState)
 
+# A probe that reads only the exit status is not enough to decide whether a
+# hardening flag may be used, and Apple's clang is why. `-fstack-clash-protection`
+# is not implemented for arm64 darwin, and the compiler reports that as a
+# *warning* -- "argument unused during compilation" -- so a probe that compiles
+# a real translation unit succeeded, the flag was added to the build, and the
+# build then failed under `-Werror` with the flag in place. That is the macOS
+# job's failure, and the reason it is recorded here rather than in a comment
+# about macOS.
+#
+# CMake's own CXX probe does not catch this spelling either: its failure
+# patterns are "command-line option ... is valid for X but not for C++" and
+# "argument ... is not valid for C++", which are GCC's ways of saying it, and
+# neither matches clang's. The probe below therefore asks the question the
+# build actually needs answered -- does the compiler accept this flag *without
+# a diagnostic* -- by promoting warnings to errors for the duration of the
+# probe. The promotion is scoped to the probe: a flag that the compiler
+# complains about must be absent from the build, not reported by it.
+function(meta_auth_promote_diagnostics)
+    if(MSVC)
+        set(CMAKE_REQUIRED_FLAGS "/WX" PARENT_SCOPE)
+    else()
+        set(CMAKE_REQUIRED_FLAGS "-Werror" PARENT_SCOPE)
+    endif()
+endfunction()
+
 function(meta_auth_enable_compile_flag target flag)
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_QUIET ON)
+    meta_auth_promote_diagnostics()
     check_cxx_compiler_flag("${flag}" _meta_auth_supports)
     cmake_pop_check_state()
     if(_meta_auth_supports)

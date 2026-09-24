@@ -55,7 +55,6 @@ struct fresh_resource {
 constexpr rights_set read_only{right::read};
 constexpr rights_set read_write{right::read, right::write};
 constexpr rights_set everything = rights_set::all();
-constexpr rights_set delegating{right::read, right::grant};
 constexpr rights_set read_and_grant{right::read, right::grant};
 constexpr rights_set write_and_grant{right::write, right::grant};
 constexpr rights_set write_only{right::write};

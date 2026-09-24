@@ -139,6 +139,46 @@ and those are not.
   reported "no matching function" and a page of candidates. Both are now
   `= delete("...")` overloads, which is also what makes the negative suite
   portable: the message is the library's, not the compiler's.
+* **Clang found dead code in the suite that GCC does not diagnose.** An unused
+  `rights_set delegating` fixture in `test_capability.cpp` (a duplicate of
+  `read_and_grant`), an `admin_credential` record in `test_auth.cpp` that no
+  test consulted, and a `&start` capture in `test_revocation.cpp` that the
+  lambda never used. Removed. This is the first thing Clang 21 was asked to do
+  that GCC had not already done, and it is the kind of defect the suites are
+  supposed to exclude: a fixture nobody uses is a claim nobody checks.
+
+**Continuous integration**
+
+The first run of the new workflow was red in seven of its ten jobs, and every
+one of the seven was a defect in the job rather than in the library. Recorded
+because a job that fails for its own reasons is worse than no job: it reports
+the library's health as unknown while looking like a verdict on it.
+
+* **The Clang job was testing a compiler below the library's floor.** It
+  installed the runner image's `clang`, which on Ubuntu 24.04 is version 18, so
+  every translation unit stopped at `config.hpp`'s one-sentence refusal
+  (`__cpp_deleted_function >= 202403L`) — a job that measured Clang's release
+  schedule rather than this library. It now runs in the reference container,
+  where the distribution's `clang` is 21, the version the README claims.
+* **The GCC 15 job could not install its compiler.** Ubuntu 24.04 has no
+  `g++-15` package, so the install step failed and the job then reported
+  `g++-15: command not found` twice. The same container carries it.
+* **`asan`, `tsan` and `bench` found no compiler at all.** The container's only
+  compiler is `g++-16`, which provides no unsuffixed `c++`, and those three
+  presets ask CMake to find the host toolchain; they now name it. This also
+  makes the sanitizer jobs run the *reference* configuration — GCC 16, contracts
+  and reflection on — rather than a fallback of it.
+* **The Windows job pinned a Visual Studio the runner image no longer has**, and
+  failed in `project()` with "could not find any instance of Visual Studio"
+  before compiling a line. The generator is no longer pinned: the job is
+  testing MSVC, not a release of MSVC.
+* **The macOS job failed on a flag the probe had accepted.** Apple's clang
+  reports an unimplemented `-fstack-clash-protection` for arm64 as a warning
+  ("argument unused during compilation"), so a probe that reads only the exit
+  status said yes and the build then failed under `-Werror` with the flag in
+  place. The probe now promotes diagnostics to errors for the duration of its
+  own run — the question is whether the compiler accepts the flag *silently*,
+  because that is what the build does with it.
 
 ### Changed
 
@@ -147,11 +187,21 @@ and those are not.
   Windows. `dev-gcc16` and `portable-gcc16` are the pinned reference
   configurations CI runs; `dev-clang` and `windows-msvc` cover the other
   front ends.
-* **Every hardening flag is probed.** `-fstack-clash-protection` and
-  `-fcf-protection=full` were added unconditionally, which is correct on x86
-  GNU/Linux and wrong everywhere else: Apple's clang rejects `-fcf-protection`
-  outright for an arm64 target, so the build failed in the toolchain before it
-  reached the library.
+* **Every hardening flag is probed, and the probe reads diagnostics rather than
+  exit status.** `-fstack-clash-protection` and `-fcf-protection=full` were
+  added unconditionally, which is correct on x86 GNU/Linux and wrong everywhere
+  else: Apple's clang rejects `-fcf-protection` outright for an arm64 target, so
+  the build failed in the toolchain before it reached the library. The first
+  probe fixed that one and missed its sibling, because a compiler reports an
+  unsupported `-f` flag as a warning; warnings are now errors for the probe.
+* **`-Wunreachable-code` is out of the Clang set.** Clang 21 reports the arm of
+  a constant ternary that is not taken — `META_AUTH_HAS_CONTRACTS ? "enforced" :
+  "disabled"` in the dialect report, a line whose whole purpose is to print
+  which arm was taken — as code that "will never be executed". The diagnostic is
+  a source-level heuristic rather than a data-flow fact, and a warning set that
+  produces false positives gets switched off wholesale, which is worse than a
+  shorter set that is always believed. The data-flow facts that caught the dead
+  code above stay.
 * **The warning set is three sets, not one.** Clang gets a validated subset,
   MSVC gets `/W4 /permissive- /Zc:__cplusplus` and the numbered `/w14xxx`
   diagnostics that correspond to `-Wconversion` and `-Wshadow`, and GCC keeps
