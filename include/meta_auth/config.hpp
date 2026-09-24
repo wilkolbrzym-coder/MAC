@@ -120,7 +120,7 @@
 #endif
 
 #if META_AUTH_HAS_DELETED_WITH_MESSAGE == 0
-#error "meta-auth-core requires P2573 deleted functions with a diagnostic message (__cpp_deleted_function >= 202403L). GCC 15+, Clang 19+ and MSVC 19.40+ implement it. The library's diagnostics are built on it: every operation that a state, a policy or a capability forbids is reported by a sentence saying which one."
+#error "meta-auth-core requires P2573 deleted functions with a diagnostic message (__cpp_deleted_function >= 202403L). GCC 15+ and Clang 19+ implement it; MSVC 19.51 does not define the macro, and a build with it stops here rather than at a page of syntax errors. The library's diagnostics are built on the feature: every operation that a state, a policy or a capability forbids is reported by a sentence saying which one."
 #endif
 
 // C++26 fixed-capacity vector. The capability tables and the audit ring are

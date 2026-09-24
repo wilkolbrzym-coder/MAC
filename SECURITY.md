@@ -86,7 +86,10 @@ The guarantees are strongest on GCC 16, which implements the three dialect
 features the library is built on. One of them is required and two are optional.
 
 **Required: P2573 deleted functions with a message** (`= delete("reason")`,
-`__cpp_deleted_function >= 202403L` — GCC 15+, Clang 19+, MSVC 19.40+). The
+`__cpp_deleted_function >= 202403L` — GCC 15+ and Clang 19+; **MSVC does not
+implement it** as of 19.51 / Visual Studio 18, so this library does not build
+there, and the CI job asserts that it does not rather than implying it might).
+The
 diagnostics are the library's user interface: every operation that a state, a
 policy or a capability forbids is rejected by a sentence saying which one. On a
 compiler without the feature that degrades to "no matching function" and a page

@@ -200,27 +200,30 @@ to assume it misses nothing.
 * **`-fno-exceptions` is not exercised.** The library throws nothing, so it
   should compile with exceptions disabled, and no preset proves it. The claim is
   therefore not made in `SECURITY.md`.
-* **AppleClang and MSVC have not been run on the machine this was developed
-  on.** GCC 15, GCC 16, Clang 19 and Clang 21 have: `ctest` is green on all
-  four in the portable configuration, 43/43, negative suite included, and GCC 15
-  was the configuration in which the `fixed_string::contains` and
-  `-Werror=noexcept` defects were found. Clang 19 is the floor the README
-  states, so that floor is now measured rather than argued; Clang 21 is what CI
-  builds. AppleClang and MSVC are covered by the `macos/portable` (Homebrew
-  LLVM, because Apple's clang predates P2573) and `windows/msvc` jobs. Neither
-  has produced a green run yet, and neither failure has been about the library:
-  the hardening probe accepted `-fstack-clash-protection` for arm64 darwin,
-  where clang reports the flag as unused — a *warning*, which a probe reading
-  exit status takes for acceptance, and which the probe never even compiled
-  because every flag shared one result variable and CMake skips a probe whose
-  result is already defined; MSVC stopped in CMake, which has no CXX26 dialect
-  for MSVC; and then the macOS job reached the sources, where Homebrew's LLVM —
-  version 23 today, tracking upstream rather than a release — reports the test
-  framework's `__COUNTER__` as a C2y extension under `-Wpedantic`, which the
-  framework now spells `__LINE__`. Each is fixed in this tree and unverified on
-  the machine it concerns, which is what those jobs are for. Until they run
-  green, "portable" on macOS and Windows means "portable by construction", not
-  "portable as measured".
+* **MSVC cannot build the library at all**, and that is a fact about the
+  compiler rather than about the test setup: MSVC 19.51 does not implement
+  P2573, so `__cpp_deleted_function` is absent and `config.hpp` refuses every
+  translation unit in one sentence. The `windows/msvc` job asserts that
+  refusal — it passes while the library is correctly rejected and fails when
+  MSVC ships the feature — so the claim "MSVC cannot build this" is checked
+  rather than assumed. An earlier README claimed "MSVC 19.40+ implements it",
+  which was never measured and is not true.
+* **AppleClang has not been run on the machine this was developed on.** GCC 15,
+  GCC 16, Clang 19 and Clang 21 have: `ctest` is green on all four in the
+  portable configuration, 43/43, negative suite included, and GCC 15 was the
+  configuration in which the `fixed_string::contains` and `-Werror=noexcept`
+  defects were found. Clang 19 is the floor the README states, so that floor is
+  measured rather than argued, and CI's `linux/clang` job measures Clang 21.
+  AppleClang is covered by the `macos/portable` job, which runs Homebrew LLVM
+  instead — Apple's clang predates P2573 — and which is green as of the run that
+  replaced the framework's `__COUNTER__` with `__LINE__`. What that job had to
+  get past first is the reason the job exists: the hardening probe accepted
+  `-fstack-clash-protection` for arm64 darwin, where clang reports the flag as
+  unused — a *warning*, which a probe reading exit status takes for acceptance,
+  and which the probe never even compiled because every flag shared one result
+  variable and CMake skips a probe whose result is already defined. Homebrew's
+  LLVM is version 23 today, tracking upstream rather than a release, and it
+  reports `__COUNTER__` as a C2y extension under `-Wpedantic`.
 * **The audit trail can lose a record, not merely overwrite one.** The bound
   used to be stated as "up to `capacity` concurrent writers", on the reasoning
   that two writers share a slot only when their sequences differ by 256, which

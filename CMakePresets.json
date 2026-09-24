@@ -178,7 +178,7 @@
     {
       "name": "windows-msvc",
       "displayName": "Windows, MSVC through the newest Visual Studio (x64)",
-      "description": "For a Windows machine without Ninja or a developer command prompt. Multi-config: pick Debug or Release with --config on the build and test commands. Contracts and static reflection are GCC features today, so this configuration runs with the portable fallbacks -- which is the point of it.",
+      "description": "For a Windows machine without Ninja or a developer command prompt. Multi-config: pick Debug or Release with --config on the build and test commands. Contracts and static reflection are GCC features today, so this configuration runs with the portable fallbacks -- and it does not build today either, because MSVC does not implement P2573 and config.hpp refuses without it. The CI job asserts that refusal; the day MSVC ships the feature, this preset is the configuration to enable.",
       "inherits": "base-msvc",
       "cacheVariables": {
         "META_AUTH_BUILD_TESTS": "ON",

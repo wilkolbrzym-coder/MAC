@@ -16,8 +16,10 @@
 #                      concurrent readers and writers
 #    linux/gcc-15      the oldest compiler the README claims works
 #    linux/clang       the other front end, and the one macOS uses
-#    macos/portable    AppleClang, no contracts, no reflection
-#    windows/msvc      MSVC through the Visual Studio generator
+#    macos/portable    Homebrew LLVM on Apple silicon, no contracts, no reflection
+#    windows/msvc      the negative claim: MSVC does not implement P2573, so the
+#                      library must refuse to build there. The job goes red the
+#                      day that stops being true.
 #    bench             the optimized build, and the constant-time measurement
 #                      that gates on its own spread
 #
@@ -219,17 +221,23 @@ jobs:
         run: ctest --preset portable --output-on-failure
 
   # -------------------------------------------------------------------------
-  # Windows: MSVC through the Visual Studio generator, which needs neither
-  # Ninja nor a developer command prompt. Multi-config, so the configuration
-  # is chosen on the build and test lines.
+  # Windows: a negative assertion, and it is a negative assertion on purpose.
   #
-  # The generator is not pinned in the preset, and that is a fix rather than an
-  # oversight: it named "Visual Studio 17 2022", and the runner image no longer
-  # has that instance installed, so the job failed in `project()` with
-  # "Generator Visual Studio 17 2022 could not find any instance of Visual
-  # Studio" before a line of the library was compiled. CMake's default
-  # generator on Windows is the newest Visual Studio it can find, which is the
-  # property this job wants: it is testing MSVC, not a release of MSVC.
+  # This job used to build and test the library with MSVC. It cannot: MSVC does
+  # not implement P2573 (`= delete("reason")`), and the macro it would publish,
+  # `__cpp_deleted_function`, is absent in 19.51 -- measured here, in this job,
+  # after the README had claimed "MSVC 19.40+" for a compiler that never had
+  # the feature. The library refuses to compile without it, by design and in one
+  # sentence, because every rejection it makes is a sentence rather than "no
+  # matching function".
+  #
+  # So the job asserts the blocker instead of pretending to test the library: it
+  # configures, builds, and requires the build to stop at that sentence. It goes
+  # green while MSVC lacks the feature and *fails* the day that changes, with the
+  # instruction to enable the configuration -- which is the only way a claim
+  # like "MSVC cannot build this" stops being true silently. The generator is
+  # not pinned in the preset: a pinned year turned a runner image update into
+  # "could not find any instance of Visual Studio" before a line was compiled.
   # -------------------------------------------------------------------------
   windows:
     name: windows/msvc
@@ -244,13 +252,20 @@ jobs:
       - name: Configure
         run: cmake --preset windows-msvc
 
-      - name: Build
-        run: cmake --build --preset windows-msvc
-
-      # `noTestsAction: error` in the preset is what keeps a run that selected
-      # nothing from being reported as a pass.
-      - name: Test
-        run: ctest --preset windows-msvc --output-on-failure
+      # `set +e` and a grep on the log rather than a status check, because the
+      # expected outcome *is* a failed build. `meta_auth_demo` is the smallest
+      # target that reaches the header.
+      - name: The library must still refuse to compile here
+        shell: bash
+        run: |
+          set +e
+          cmake --build --preset windows-msvc --target meta_auth_demo 2>&1 | tee msvc-build.log
+          if grep -q "requires P2573 deleted functions" msvc-build.log; then
+            echo "MSVC still does not implement P2573; the library refuses to build, as documented."
+            exit 0
+          fi
+          echo "::error::the build no longer stops at the P2573 floor. Either MSVC implements it now — enable the windows configuration, restore the README row and make this job build and test — or the failure is a different one, which is a defect."
+          exit 1
 
   # -------------------------------------------------------------------------
   # The optimized build, and its self-gating measurement.

@@ -203,6 +203,17 @@ the library's health as unknown while looking like a verdict on it.
   compiler that can hear it; MSVC takes the mode from the library's interface
   requirement.
 
+* **MSVC does not implement P2573, and the job now says so.** With the CMake
+  dialect fixed and the sources reached, MSVC 19.51 stopped at `config.hpp`'s
+  floor: `__cpp_deleted_function` is not defined by the compiler, and
+  cppreference's C++26 support table lists P2573R2 for GCC 15 and Clang 19 only.
+  The README, `SECURITY.md` and the `#error` sentence all claimed "MSVC 19.40+
+  implements it", which was never measured and is false. The claims are
+  corrected, and `windows/msvc` is now the negative assertion the project style
+  asks for: it configures, builds, and requires the build to stop at that
+  sentence — green while MSVC lacks the feature, red the day it ships, with the
+  instruction to enable the configuration instead of a silent rot.
+
 * **MSVC could not configure at all**, and the cause was CMake's: CMake has no
   CXX26 dialect for MSVC (its module stops at CXX23, which MSVC spells
   `/std:c++latest`), so `CMAKE_CXX_STANDARD 26` made every `try_compile` in the

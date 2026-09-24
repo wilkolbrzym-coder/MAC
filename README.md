@@ -163,11 +163,18 @@ CMake's default generator is Unix Makefiles. The Visual Studio preset is the
 one exception, and it exists so that a Windows machine needs neither).
 
 The library requires **P2573 deleted functions with a message** — `=
-delete("reason")`, reported as `__cpp_deleted_function >= 202403L` by GCC 15+,
-Clang 19+ and MSVC 19.40+. That is a floor, not an option: the diagnostics are
-the library's user interface, and without the feature every rejection degrades
-to "no matching function". `config.hpp` says so in one sentence rather than
-letting the compiler produce a page of syntax errors.
+delete("reason")`, reported as `__cpp_deleted_function >= 202403L` by GCC 15+
+and Clang 19+. That is a floor, not an option: the diagnostics are the library's
+user interface, and without the feature every rejection degrades to "no
+matching function". `config.hpp` says so in one sentence rather than letting the
+compiler produce a page of syntax errors.
+
+**MSVC does not implement it.** The macro is absent in 19.51 (Visual Studio 18,
+2026), which the `windows/msvc` CI job measured; the job now asserts the
+blocker — it passes while the library is correctly refused there and fails the
+day MSVC ships the feature, with the instruction to enable the configuration.
+The claim that MSVC 19.40+ supports it was made in an earlier version of this
+file and was never measured.
 
 Contracts and static reflection are *optional* and are probed:
 
@@ -177,13 +184,15 @@ Contracts and static reflection are *optional* and are probed:
 | portable | GCC 15 | no | no | `ctest` on GCC 15, green |
 | portable | Clang 19 and 21 | no | no | `ctest` here on both; CI job `linux/clang` (21), green |
 | portable | Homebrew LLVM (23 today) | no | no | CI job `macos/portable` — no green run yet |
-| portable | MSVC 19.40+ | no | no | CI job `windows/msvc` — no green run yet |
+| — | MSVC 19.51 | — | — | not supported: no P2573; CI asserts the blocker |
 
 "Verified" means a green run on the machine this was written on, or in CI where
 the row says so. GCC 15, GCC 16, Clang 19 and Clang 21 have been run here, and
-the `linux/clang` job is green; AppleClang and MSVC have not — neither compiler
-is installed here — so those two rows are the CI jobs' to earn, and neither job
-has gone green yet. `docs/testing.md` lists that among the known gaps rather
+the `linux/clang` job is green. Homebrew LLVM has not been run here — there is
+no macOS machine — and its job went green only once the framework stopped using
+`__COUNTER__`, which Clang 23 reports as a C2y extension. MSVC is not a testing
+gap but a compiler that cannot build the library at all: the row above says so,
+the job asserts it, and `docs/testing.md` lists it among the known gaps rather
 than burying it.
 
 Presets: `dev`, `portable` (no contracts, no reflection), `release`, `asan`,
